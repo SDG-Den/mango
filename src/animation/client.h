@@ -631,14 +631,9 @@ void client_draw_border(Client *c, struct ivec2 offsets) {
 			? corner_radii_none()
 			: set_client_corner_location(c);
 
-	if (hit_no_border && config.smartgaps) {
+	if (hit_no_border) {
 		c->bw = 0;
 		c->fake_no_border = true;
-	} else if (hit_no_border && !config.smartgaps) {
-		wlr_scene_rect_set_size(c->border, 0, 0);
-		wlr_scene_node_set_position(&c->scene_surface->node, c->bw, c->bw);
-		c->fake_no_border = true;
-		return;
 	} else if (!c->isfullscreen && VISIBLEON(c, c->mon)) {
 		c->bw = c->isnoborder ? 0 : config.borderpx;
 		c->fake_no_border = false;
@@ -1423,7 +1418,7 @@ void resize_apply(Client *c, struct wlr_box geo, ResizeOpts opts) {
 		c->bw = 0;
 
 	bool hit_no_border = check_hit_no_border(c);
-	if (hit_no_border && config.smartgaps) {
+	if (hit_no_border) {
 		c->bw = 0;
 		c->fake_no_border = true;
 	}
@@ -1482,12 +1477,8 @@ void resize_apply(Client *c, struct wlr_box geo, ResizeOpts opts) {
 			!c->animation.overview_enter_anim_set)
 			c->animation.overining = false;
 
-		/* 设置进入放大动画：ov_tab 所有窗口，其余除 sel 外 */
-		bool is_ov_tab = config.ov_tab_mode && !c->mon->is_jump_mode &&
-						 !c->mon->ov_normal_mode;
-		if (config.animations && c->mon->isoverview &&
-			((is_ov_tab && config.ov_tab_mode_launch_next) ||
-			 c != c->mon->sel) &&
+		/* 设置进入放大动画：除 sel 外的窗口 */
+		if (config.animations && c->mon->isoverview && c != c->mon->sel &&
 			c->animation.action == OVERVIEW &&
 			!c->animation.overview_enter_anim_set) {
 			c->animation.overview_enter_anim_set = true;

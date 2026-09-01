@@ -312,6 +312,7 @@ typedef struct {
 	int32_t edge_scroller_pointer_focus;
 	double edge_scroller_focus_allow_speed;
 	int32_t focus_cross_monitor;
+	int32_t focusdir_only_zone_overlap;
 	int32_t exchange_cross_monitor;
 	int32_t scratchpad_cross_monitor;
 	int32_t focus_cross_tag;
@@ -352,11 +353,10 @@ typedef struct {
 	int32_t hotarea_size;
 	int32_t hotarea_corner;
 	int32_t enable_hotarea;
-	int32_t ov_tab_mode;
-	int32_t ov_tab_mode_launch_next;
 
 	int32_t overviewgappi;
 	int32_t overviewgappo;
+	float overcircle_center_ratio;
 	char *jump_labels;
 	uint32_t cursor_hide_timeout;
 	uint32_t cursor_hide_on_keypress;
@@ -704,6 +704,7 @@ static void set_binding_keymode(Config *config, char mode[28],
 
 int32_t parse_circle_direction(const char *str) {
 	// 将输入字符串转换为小写
+
 	char lowerStr[10];
 	int32_t i = 0;
 	while (str[i] && i < 9) {
@@ -1217,6 +1218,9 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	if (strcmp(func_name, "focusstack") == 0) {
 		func = focusstack;
 		(*arg).i = parse_circle_direction(arg_value);
+	} else if (strcmp(func_name, "overcircle") == 0) {
+		func = overcircle;
+		(*arg).i = parse_circle_direction(arg_value);
 	} else if (strcmp(func_name, "groupfocus") == 0) {
 		func = groupfocus;
 		(*arg).i = parse_circle_direction(arg_value);
@@ -1280,10 +1284,8 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).v = has_name ? strdup(arg_value2) : NULL;
 	} else if (strcmp(func_name, "toggleoverview") == 0) {
 		func = toggleoverview;
-		(*arg).i = atoi(arg_value);
 	} else if (strcmp(func_name, "togglejump") == 0) {
 		func = togglejump;
-		(*arg).i = atoi(arg_value);
 	} else if (strcmp(func_name, "set_proportion") == 0) {
 		func = set_proportion;
 		(*arg).f = atof(arg_value);
@@ -1315,6 +1317,27 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		func = centerwin;
 	} else if (strcmp(func_name, "focuslast") == 0) {
 		func = focuslast;
+	} else if (strcmp(func_name, "switcher") == 0) {
+		func = switcher;
+		if (strcmp(arg_value, "all_next") == 0) {
+			(*arg).i = NEXT;
+			(*arg).i2 = SW_ALL_MON;
+		} else if (strcmp(arg_value, "all_prev") == 0) {
+			(*arg).i = PREV;
+			(*arg).i2 = SW_ALL_MON;
+		} else if (strcmp(arg_value, "all_tag_next") == 0) {
+			(*arg).i = NEXT;
+			(*arg).i2 = SW_ALL_TAG;
+		} else if (strcmp(arg_value, "all_tag_prev") == 0) {
+			(*arg).i = PREV;
+			(*arg).i2 = SW_ALL_TAG;
+		} else if (strcmp(arg_value, "prev") == 0) {
+			(*arg).i = PREV;
+			(*arg).i2 = SW_CURRENT_TAG;
+		} else {
+			(*arg).i = NEXT;
+			(*arg).i2 = SW_CURRENT_TAG;
+		}
 	} else if (strcmp(func_name, "toggle_trackpad_enable") == 0) {
 		func = toggle_trackpad_enable;
 	} else if (strcmp(func_name, "setoption") == 0) {
@@ -1706,6 +1729,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->edge_scroller_focus_allow_speed = atof(value);
 	} else if (strcmp(key, "focus_cross_monitor") == 0) {
 		config->focus_cross_monitor = atoi(value);
+	} else if (strcmp(key, "focusdir_only_zone_overlap") == 0) {
+		config->focusdir_only_zone_overlap = atoi(value);
 	} else if (strcmp(key, "exchange_cross_monitor") == 0) {
 		config->exchange_cross_monitor = atoi(value);
 	} else if (strcmp(key, "scratchpad_cross_monitor") == 0) {
@@ -1993,14 +2018,12 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->hotarea_corner = atoi(value);
 	} else if (strcmp(key, "enable_hotarea") == 0) {
 		config->enable_hotarea = atoi(value);
-	} else if (strcmp(key, "ov_tab_mode") == 0) {
-		config->ov_tab_mode = atoi(value);
-	} else if (strcmp(key, "ov_tab_mode_launch_next") == 0) {
-		config->ov_tab_mode_launch_next = atoi(value);
 	} else if (strcmp(key, "overviewgappi") == 0) {
 		config->overviewgappi = atoi(value);
 	} else if (strcmp(key, "overviewgappo") == 0) {
 		config->overviewgappo = atoi(value);
+	} else if (strcmp(key, "overcircle_center_ratio") == 0) {
+		config->overcircle_center_ratio = atof(value);
 	} else if (strcmp(key, "jump_labels") == 0) {
 		if (config->jump_labels)
 			free(config->jump_labels);
@@ -4323,11 +4346,10 @@ void override_config(void) {
 	config.hotarea_size = CLAMP_INT(config.hotarea_size, 1, 1000);
 	config.hotarea_corner = CLAMP_INT(config.hotarea_corner, 0, 3);
 	config.enable_hotarea = CLAMP_INT(config.enable_hotarea, 0, 1);
-	config.ov_tab_mode = CLAMP_INT(config.ov_tab_mode, 0, 1);
-	config.ov_tab_mode_launch_next =
-		CLAMP_INT(config.ov_tab_mode_launch_next, 0, 1);
 	config.overviewgappi = CLAMP_INT(config.overviewgappi, 0, 1000);
 	config.overviewgappo = CLAMP_INT(config.overviewgappo, 0, 1000);
+	config.overcircle_center_ratio =
+		CLAMP_FLOAT(config.overcircle_center_ratio, 0.1f, 0.9f);
 	config.xwayland_persistence = CLAMP_INT(config.xwayland_persistence, 0, 1);
 	config.xwayland_ignore_scale =
 		CLAMP_INT(config.xwayland_ignore_scale, 0, 1);
@@ -4354,6 +4376,8 @@ void override_config(void) {
 	config.drag_corner = CLAMP_INT(config.drag_corner, 0, 4);
 	config.drag_warp_cursor = CLAMP_INT(config.drag_warp_cursor, 0, 1);
 	config.focus_cross_monitor = CLAMP_INT(config.focus_cross_monitor, 0, 1);
+	config.focusdir_only_zone_overlap =
+		CLAMP_INT(config.focusdir_only_zone_overlap, 0, 1);
 	config.exchange_cross_monitor =
 		CLAMP_INT(config.exchange_cross_monitor, 0, 1);
 	config.scratchpad_cross_monitor =
@@ -4519,8 +4543,6 @@ void set_value_default() {
 	config.log_level = WLR_ERROR;
 	config.numlockon = 0;
 	config.capslock = 0;
-	config.ov_tab_mode = 1;
-	config.ov_tab_mode_launch_next = 0;
 	config.hotarea_size = 10;
 	config.hotarea_corner = BOTTOM_LEFT;
 	config.enable_hotarea = 0;
@@ -4543,6 +4565,7 @@ void set_value_default() {
 	config.edge_scroller_pointer_focus = 1;
 	config.edge_scroller_focus_allow_speed = 0.0f;
 	config.focus_cross_monitor = 0;
+	config.focusdir_only_zone_overlap = 0;
 	config.exchange_cross_monitor = 0;
 	config.scratchpad_cross_monitor = 0;
 	config.focus_cross_tag = 0;
@@ -4574,6 +4597,7 @@ void set_value_default() {
 	config.group_bar_height = 50;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
+	config.overcircle_center_ratio = 0.5f;
 	config.cursor_hide_timeout = 0;
 	config.cursor_hide_on_keypress = 0;
 

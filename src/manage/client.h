@@ -928,13 +928,17 @@ Client *find_client_by_direction(Client *tc, const Arg *arg,
 			if (!match_dir)
 				continue;
 
+			/* focusdir_only_zone_overlap 开启时，方向聚焦要求
+			 * 目标窗口在正交坐标轴上与当前窗口有重叠区域，
+			 * 否则该窗口不作为候选，直接返回空 */
+			if (config.focusdir_only_zone_overlap && orth_dist != 0)
+				continue;
+
 			if (step == 0) {
 				if (!tc->mon || c->mon != tc->mon)
 					continue;
 				if (!tc->mon->isoverview &&
 					!client_is_in_same_stack(tc, c, NULL))
-					continue;
-				if (orth_dist != 0)
 					continue;
 			}
 
@@ -944,14 +948,8 @@ Client *find_client_by_direction(Client *tc, const Arg *arg,
 				main_dist = -main_dist;
 			}
 
-			int64_t no_overlap_penalty = 0;
-			if (orth_dist > 0) {
-				no_overlap_penalty = 10000000LL;
-			}
-
-			int64_t tmp_distance = penalty + no_overlap_penalty +
-								   (main_dist * main_dist) +
-								   (orth_dist * orth_dist);
+			int64_t tmp_distance =
+				penalty + (main_dist * main_dist) + (orth_dist * orth_dist);
 
 			if (tmp_distance < distance) {
 				distance = tmp_distance;
@@ -1460,7 +1458,7 @@ void apply_window_snap(Client *c) {
 	int32_t snap_up_mon = 0, snap_down_mon = 0, snap_left_mon = 0,
 			snap_right_mon = 0;
 
-	uint32_t cbw = !render_border || c->fake_no_border ? config.borderpx : 0;
+	uint32_t cbw = !render_border || c->fake_no_border ? c->bw : 0;
 	uint32_t tcbw;
 	uint32_t cx, cy, cw, ch, tcx, tcy, tcw, tch;
 	cx = c->geom.x + cbw;
@@ -1479,7 +1477,7 @@ void apply_window_snap(Client *c) {
 		if (tc && tc->isfloating && !tc->iskilling &&
 			client_surface(tc)->mapped && VISIBLEON(tc, c->mon)) {
 
-			tcbw = !render_border || tc->fake_no_border ? config.borderpx : 0;
+			tcbw = !render_border || tc->fake_no_border ? tc->bw : 0;
 			tcx = tc->geom.x + tcbw;
 			tcy = tc->geom.y + tcbw;
 			tcw = tc->geom.width - 2 * tcbw;
@@ -2047,6 +2045,7 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	Monitor *m = NULL;
 	Client *nextfocus = NULL;
 	c->iskilling = 1;
+	switcher_remove_client(c);
 	struct ScrollerStackNode *target_node =
 		c->mon ? find_scroller_node(
 					 c->mon->pertag->scroller_state[c->mon->pertag->curtag], c)
@@ -2227,6 +2226,7 @@ destroynotify(struct wl_listener *listener, void *data) {
 		wl_list_remove(&c->destroy_decoration.link);
 		wl_list_remove(&c->set_decoration_mode.link);
 	}
+	switcher_remove_client(c);
 	free(c);
 }
 
