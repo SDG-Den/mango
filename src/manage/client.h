@@ -1920,6 +1920,11 @@ mapnotify(struct wl_listener *listener, void *data) {
 	wlr_scene_node_lower_to_bottom(&c->shield->node);
 	wlr_scene_node_set_enabled(&c->shield->node, false);
 
+	Client *group_parent = NULL;
+	if (config.group_capture_spawn && selmon && selmon->sel &&
+		(selmon->sel->group_prev || selmon->sel->group_next))
+		group_parent = selmon->sel;
+
 	if (config.new_is_master && selmon && !is_scroller_layout(selmon))
 		// tile at the top
 		wl_list_insert(&clients, &c->link); // 新窗口是master,头部入栈
@@ -1950,6 +1955,17 @@ mapnotify(struct wl_listener *listener, void *data) {
 	if (!c->isfloating || c->force_tiled_state) {
 		client_set_tiled(c, WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT |
 								WLR_EDGE_RIGHT);
+	}
+	// handle auto-join group if group_capture_spawn is set
+	if (config.group_capture_spawn && group_parent && c->mon &&
+		c->mon == group_parent->mon &&
+		(group_parent->group_prev || group_parent->group_next)) {
+		c->group_prev = group_parent->group_prev;
+		if (group_parent->group_prev)
+			group_parent->group_prev->group_next = c;
+		c->group_next = group_parent;
+		group_parent->group_prev = c;
+		client_focus_group_member(c);
 	}
 
 	// apply buffer effects of client

@@ -135,6 +135,7 @@ bindr=Super,Super_L,spawn,rofi -show run
 | :--- | :--- | :--- |
 | `groupjoin` | `left/right/up/down`  | Join group by direction. |
 | `groupfocus` | `prev/next`  | Focus group member by direction. |
+| `groupmerge` | `left/right/up/down` | merges window in given direction into focused window |
 | `groupleave` | -  | Leave group. |
 
 ### Tags & Monitors

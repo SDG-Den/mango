@@ -301,6 +301,45 @@ void groupjoin(const Arg *arg) {
 	return;
 }
 
+void groupmerge(const Arg *arg) {
+	if (!selmon)
+		return;
+	if (selmon->isoverview)
+		return;
+
+	Client *group = selmon->sel;
+	if (!group || !group->mon)
+		return;
+
+	Client *target = direction_select(arg);
+	if (!target || target == group)
+		return;
+	Monitor *oldmon = NULL;
+
+	if (target->group_next || target->group_prev)
+		groupleave(&(Arg){.tc = target});
+
+	if (target->mon != group->mon) {
+		oldmon = target->mon;
+		target->mon = group->mon;
+	}
+
+	if (!group->group_prev && !group->group_next)
+		group->isgroupfocusing = true;
+
+	target->group_next = group;
+	if (group->group_prev)
+		group->group_prev->group_next = target;
+	target->group_prev = group->group_prev;
+	group->group_prev = target;
+
+	client_focus_group_member(target);
+	arrange(target->mon, false, false);
+
+	if (oldmon)
+		arrange(oldmon, false, false);
+}
+
 void groupleave(const Arg *arg) {
 
 	if (!selmon)
