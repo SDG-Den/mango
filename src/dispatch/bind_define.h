@@ -1137,6 +1137,18 @@ void centerwin(const Arg *arg) {
 	return;
 }
 
+static void close_inherited_fds(void) {
+#ifdef SYS_close_range
+	extern long syscall(long number, ...);
+	if (syscall(SYS_close_range, 3, ~0U, 0) == 0)
+		return;
+#endif
+	int fd_max = sysconf(_SC_OPEN_MAX);
+	for (int i = 3; i < fd_max; i++) {
+		close(i);
+	}
+}
+
 void spawn_shell(const Arg *arg) {
 	if (!arg->v)
 		return;
@@ -1145,18 +1157,10 @@ void spawn_shell(const Arg *arg) {
 	const char *activation_token = xdg_activation_v1_export_token();
 
 	if (fork() == 0) {
-		signal(SIGSEGV, SIG_DFL);
-		signal(SIGABRT, SIG_DFL);
-		signal(SIGILL, SIG_DFL);
-		signal(SIGCHLD, SIG_DFL);
-
 		if (activation_token)
 			setenv("XDG_ACTIVATION_TOKEN", activation_token, 1);
 
-		int fd_max = sysconf(_SC_OPEN_MAX);
-		for (int i = 3; i < fd_max; i++) {
-			close(i);
-		}
+		close_inherited_fds();
 
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
@@ -1180,20 +1184,10 @@ void spawn(const Arg *arg) {
 	const char *activation_token = xdg_activation_v1_export_token();
 
 	if (fork() == 0) {
-		signal(SIGSEGV, SIG_DFL);
-		signal(SIGABRT, SIG_DFL);
-		signal(SIGILL, SIG_DFL);
-		signal(SIGCHLD, SIG_DFL);
-
 		if (activation_token)
 			setenv("XDG_ACTIVATION_TOKEN", activation_token, 1);
 
-		// close all file descriptors inherited from the parent process to
-		// prevent IPC handle leakage that can block clients
-		int fd_max = sysconf(_SC_OPEN_MAX);
-		for (int i = 3; i < fd_max; i++) {
-			close(i);
-		}
+		close_inherited_fds();
 
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
