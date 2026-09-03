@@ -1967,7 +1967,13 @@ mapnotify(struct wl_listener *listener, void *data) {
 			group_parent->group_prev->group_next = c;
 		c->group_next = group_parent;
 		group_parent->group_prev = c;
+		c->is_pending_open_animation = false;
 		client_focus_group_member(c);
+		
+		
+	} else {
+		// make sure the animation is open type
+		c->is_pending_open_animation = true;
 	}
 
 	// apply buffer effects of client
@@ -1982,8 +1988,8 @@ mapnotify(struct wl_listener *listener, void *data) {
 		overview_backup_surface(c);
 	}
 
-	// make sure the animation is open type
-	c->is_pending_open_animation = true;
+	
+	
 	resize(c, c->geom, 0);
 	printstatus(IPC_WATCH_ARRANGGE);
 }
