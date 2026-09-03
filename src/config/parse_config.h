@@ -1254,6 +1254,12 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	} else if (strcmp(func_name, "groupmerge") == 0) {
 		func = groupmerge;
 		(*arg).i = parse_direction(arg_value);
+	} else if (strcmp(func_name, "groupinit") == 0) {
+		func = groupinit;
+	} else if (strcmp(func_name, "groupall") == 0) {
+		func = groupall;
+	} else if (strcmp(func_name, "groupdisband") == 0) {
+		func = groupdisband;
 	} else if (strcmp(func_name, "focusid") == 0) {
 		func = focusid;
 	} else if (strcmp(func_name, "incnmaster") == 0) {
