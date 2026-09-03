@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <linux/input-event-codes.h>
 #include <math.h>
+#include <pthread.h>
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <scenefx/types/fx/blur_data.h>
 #include <scenefx/types/fx/clipped_region.h>
@@ -21,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -522,6 +524,8 @@ typedef struct {
 	struct wlr_keyboard
 		*keyboard; /* 实际生效的 wlr_keyboard（group 或独立键盘） */
 	struct wlr_keyboard *virtual_keyboard;
+	struct wlr_keyboard
+		*prev_seat_keyboard; /* 接管 seat 前生效的键盘，销毁时恢复用 */
 
 	int32_t nsyms;
 	const xkb_keysym_t *keysyms; /* invalid if nsyms == 0 */
@@ -1161,6 +1165,7 @@ static struct wlr_keyboard
 	*last_active_keyboard; /* 最后按键的键盘，get keyboardlayout 用 */
 static struct wl_list inputdevices;
 static struct wl_list standalone_keyboards; /* 独立键盘链表 */
+static struct wl_list virtual_keyboards;	/* 虚拟键盘组链表 */
 static struct wl_list keyboard_shortcut_inhibitors;
 static uint32_t cursor_mode;
 static Client *grabc, *dropc;
@@ -1356,6 +1361,16 @@ void handlesig(int32_t signo) {
 			;
 	else if (signo == SIGINT || signo == SIGTERM)
 		quit(NULL);
+}
+
+static void restore_child_signals(void) {
+	sigset_t set;
+	sigemptyset(&set);
+	sigprocmask(SIG_SETMASK, &set, NULL);
+
+	struct sigaction sa_dfl = {.sa_flags = 0, .sa_handler = SIG_DFL};
+	sigaction(SIGCHLD, &sa_dfl, NULL);
+	sigaction(SIGPIPE, &sa_dfl, NULL);
 }
 
 void cleanuplisteners(void) {
@@ -1588,6 +1603,8 @@ void setup(void) {
 	struct sigaction sa_pipe = {.sa_flags = 0, .sa_handler = SIG_IGN};
 	sigemptyset(&sa_pipe.sa_mask);
 	sigaction(SIGPIPE, &sa_pipe, NULL);
+
+	pthread_atfork(NULL, NULL, restore_child_signals);
 
 	wlr_log_init(config.log_level, NULL);
 
@@ -1866,6 +1883,7 @@ void setup(void) {
 	 */
 	wl_list_init(&inputdevices);
 	wl_list_init(&standalone_keyboards);
+	wl_list_init(&virtual_keyboards);
 	wl_list_init(&tablets);
 	wl_list_init(&tablet_pads);
 	wl_list_init(&keyboard_shortcut_inhibitors);
