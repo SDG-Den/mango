@@ -445,6 +445,8 @@ void groupdisband(const Arg *arg) {
 	if (!target->group_prev && !target->group_next) {
 		if (target->isgroupfocusing) {
 			target->isgroupfocusing = false;
+			focusclient(target, 1);
+			arrange(target->mon, false, false);
 		}
 		return;
 	}
