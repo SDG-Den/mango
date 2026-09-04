@@ -65,6 +65,8 @@ windowrule=Parameter:Values,Parameter:Values,appid:Values,title:Values
 | `isnoanimation` | integer | `0` / `1` | Not apply animation |
 | `focused_opacity` | integer | `0` / `1` | Window focused opacity |
 | `unfocused_opacity` | integer | `0` / `1` | Window unfocused opacity |
+| `active_dim` | integer | `0` / `1` | Window focused dim |
+| `inactive_dim` | integer | `0` / `1` | Window unfocused dim|
 | `allow_csd` | integer | `0` / `1` | Allow client side decoration |
 | `activeborder` | hex color | `0x000000FF` | Set focused border color | 
 | `inactiveborder` | hex color | `0x000000FF` | Set focused border color | 
