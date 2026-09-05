@@ -108,6 +108,7 @@
 #include "common/log.h"
 #include "common/util.h"
 #include "draw/text-node.h"
+#include "draw/gradient.h"
 
 /* macros */
 #define MANGO_MAX(A, B) ((A) > (B) ? (A) : (B))
@@ -362,6 +363,11 @@ struct Client {
 	Monitor *mon;
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border; /* top, bottom, left, right */
+	GradientBorder active_gradient;
+	GradientBorder inactive_gradient;
+	struct wlr_buffer *gradient_buf;
+	struct wlr_box gradient_size;
+	struct wlr_scene_buffer *gradient;
 	struct wlr_scene_rect *droparea;
 	struct wlr_scene_rect *splitindicator[4];
 	struct wlr_scene_shadow *shadow;
@@ -782,6 +788,13 @@ static void focuslayer(LayerSurface *l);
 static void focusclient(Client *c, int32_t lift);
 
 static void setborder_color(Client *c);
+static void client_clear_gradient(GradientBorder *gradient);
+static void client_set_gradient(Client *target, bool state, const GradientBorder *source);
+static struct wlr_buffer *gradient_rerender(Client *target);
+static void gradient_cache_teardown(void);
+static void gradient_collect_garbage(void);
+static const GradientBorder *client_current_gradient(const Client *c);
+static void client_gradient_from_string(Client *c, bool state, const char *s);
 static Client *focustop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
@@ -1233,6 +1246,7 @@ static struct {
 	int32_t hotspot_y;
 } last_cursor;
 
+#include "draw/gradient.c"
 #include "config/preset.h"
 struct Pertag {
 	uint32_t curtag, prevtag;
@@ -1349,6 +1363,7 @@ static void ipc_notify_device_event(struct wlr_input_device *device);
 #include "input/device.h"
 #include "manage/misc.h"
 
+
 void handlesig(int32_t signo) {
 	if (signo == SIGCHLD)
 		while (waitpid(-1, NULL, WNOHANG) > 0)
@@ -1450,6 +1465,7 @@ void cleanup(void) {
 	wlr_scene_node_destroy(&scene->tree.node);
 
 	mango_text_global_finish();
+	gradient_cache_teardown();
 }
 
 // 修改printstatus函数，接受掩码参数
@@ -1558,7 +1574,8 @@ run(char *startup_cmd, int readiness_fd) {
 	 * startup by writing \n to the provided file descriptor and closing it
 	 */
 	if (readiness_fd > 2) {
-		write(readiness_fd, "\n", 1);
+		ssize_t written = write(readiness_fd, "\n", 1);
+		(void) written;
 		close(readiness_fd);
 	}
 

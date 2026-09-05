@@ -614,6 +614,7 @@ void client_draw_border(Client *c, struct ivec2 offsets) {
 			wlr_scene_node_set_enabled(&c->splitindicator[0]->node, false);
 			wlr_scene_node_set_enabled(&c->splitindicator[1]->node, false);
 			wlr_scene_node_set_enabled(&c->border->node, false);
+			wlr_scene_node_set_enabled(&c->gradient->node, false);
 			wlr_scene_node_set_position(&c->scene_surface->node, 0, 0);
 		}
 		return;
@@ -675,6 +676,58 @@ void client_draw_border(Client *c, struct ivec2 offsets) {
 	wlr_scene_node_set_position(&c->border->node, rect_x, rect_y);
 	wlr_scene_rect_set_corner_radii(c->border, current_corner_location);
 	wlr_scene_rect_set_clipped_region(c->border, clipped_region);
+	gradient_rerender(c);
+
+}
+
+static struct wlr_buffer *gradient_rerender(Client *target) {
+	if (!target->gradient) return NULL;
+	const GradientBorder *current = client_current_gradient(target);
+	if (current->stopcount <= 0) {
+		wlr_scene_node_set_enabled(&target->gradient->node, false);
+		return NULL;
+	}
+	struct ivec2 offsets = compute_edge_offsets(target);
+	int32_t new_ring_width = GEZERO(target->animation.current.width - offsets.x - offsets.width);
+	int32_t new_ring_height = GEZERO(target->animation.current.height - offsets.y - offsets.height);
+
+	// early return current buffer if size is not actually changed to avoid re-render of gradient ring
+	// invalidate sets gradient_size.width and gradient_size.height to 0 to trigger this path
+	if (target->gradient_buf && new_ring_width == target->gradient_size.width && new_ring_height == target->gradient_size.height)
+		return target->gradient_buf;
+
+	struct wlr_buffer *canvas = get_gradient_texture(current);
+	if (canvas == NULL) {
+		wlr_scene_node_set_enabled(&target->gradient->node, false);
+		return NULL;
+	}
+
+	struct wlr_buffer *new_ring = gradient_make_ring(canvas, new_ring_width, new_ring_height, (int32_t)target->bw, config.border_radius);
+
+	if (new_ring == NULL) {
+		wlr_scene_node_set_enabled(&target->gradient->node, false);
+		return NULL;
+	}
+	
+	if (target->gradient_buf)
+		wlr_buffer_drop(target->gradient_buf);
+
+	target->gradient_buf = new_ring;
+	target->gradient_size.width = new_ring_width;
+	target->gradient_size.height = new_ring_height;
+
+	
+	wlr_scene_node_set_enabled(&target->gradient->node, true);
+	wlr_scene_buffer_set_buffer(target->gradient, new_ring);
+	wlr_scene_node_set_position(&target->gradient->node, offsets.x, offsets.y);
+	wlr_scene_buffer_set_corner_radii(target->gradient,
+		target->isfullscreen || (config.no_radius_when_single && target->mon && target->mon->visible_tiling_clients == 1)
+			? corner_radii_none(): set_client_corner_location(target));
+	wlr_scene_node_raise_to_top(&target->gradient->node);
+
+	return new_ring;
+	
+
 }
 
 struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box,
@@ -1116,6 +1169,11 @@ void fadeout_client_animation_next_tick(Client *c) {
 	if (animation_passed >= 1.0) {
 		wl_list_remove(&c->fadeout_link);
 		wlr_scene_node_destroy(&c->scene->node);
+		client_clear_gradient(&c->active_gradient);
+		client_clear_gradient(&c->inactive_gradient);
+		wlr_buffer_drop(c->gradient_buf);
+		if (c->gradient)
+			wlr_scene_node_destroy(&c->gradient->node);
 		free(c);
 	}
 }

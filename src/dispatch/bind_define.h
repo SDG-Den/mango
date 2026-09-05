@@ -2226,6 +2226,18 @@ void scroller_stack(const Arg *arg) {
 
 	scroller_apply_stack(c, target_client, arg->i);
 }
+void setactivegradient(const Arg *arg) {
+	Client *c = arg->tc ? arg->tc : selmon ? selmon->sel : NULL;
+	if (c)
+		client_gradient_from_string(c, true, arg->v);
+	gradient_collect_garbage();
+}
+void setinactivegradient(const Arg *arg) {
+	Client *c = arg->tc ? arg->tc : selmon ? selmon->sel : NULL;
+	if (c)
+		client_gradient_from_string(c, false, arg->v);
+	gradient_collect_garbage();
+}
 
 void toggle_all_floating(const Arg *arg) {
 	if (!selmon)

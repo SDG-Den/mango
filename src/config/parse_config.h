@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "../draw/gradient.h"
+void convert_hex_to_rgba(float *color, uint32_t hex);
 
 #ifndef SYSCONFDIR
 #define SYSCONFDIR "/etc"
@@ -114,6 +116,8 @@ typedef struct {
 	uint32_t passmod;
 	xkb_keysym_t keysym;
 	KeyBinding globalkeybinding;
+	GradientBorder active_gradient;
+	GradientBorder inactive_gradient;
 } ConfigWinRule;
 
 typedef struct {
@@ -451,6 +455,8 @@ typedef struct {
 	float scratchpadcolor[4];
 	float globalcolor[4];
 	float overlaycolor[4];
+	GradientBorder active_gradient;
+	GradientBorder inactive_gradient;
 
 	int32_t log_level;
 	uint32_t capslock;
@@ -789,6 +795,64 @@ int64_t parse_color(const char *hex_str) {
 		return -1;
 	}
 	return hex_num;
+}
+
+static bool parse_gradient(const char *input, GradientBorder *output) {
+	free(output->stops);
+	output->stops = NULL;
+	output->stopcount = 0;
+
+	if (!input || *input == '\0')
+		return true;
+	char *copy = strdup(input);
+	if (!copy)
+		return false;
+
+	// tokenize on , leading to hex:degree pairs
+	int stopcapacity = 0;
+	char *pointer = NULL;
+	char *token = strtok_r(copy, "|", &pointer);
+
+	while (token) {
+		char *separator = strchr(token, ':');
+		if (!separator) {
+			free(copy);
+			return false;
+			// token malformed
+		}
+		*separator = '\0';
+		char *color_hex = token;
+		char *degree_string = separator + 1;
+
+		int64_t color = parse_color(color_hex);
+		if (color == -1 || *degree_string == '\0') {
+			free(copy);
+			return false;
+		}
+		if (output->stopcount == stopcapacity) {
+			stopcapacity = stopcapacity == 0 ? 4 : stopcapacity * 2;
+			GradientStop *grown = 
+				realloc(output->stops, (size_t)stopcapacity * sizeof(GradientStop));
+			if (!grown) {
+				free(copy);
+				free(output->stops);
+				output->stops = NULL;
+				output->stopcount = 0;
+				return false;
+			}
+			output->stops = grown;
+		}
+		GradientStop *stop = &output->stops[output->stopcount++];
+		convert_hex_to_rgba(stop->color, (uint32_t)color);
+		stop->degree = fmodf(atof(degree_string), 360.0f);
+		if (stop->degree < 0.0f)
+			stop->degree += 360.0f;
+
+		token = strtok_r(NULL, "|", &pointer);
+
+	}
+	free(copy);
+	return true;
 }
 
 // 辅助函数：检查字符串是否以指定的前缀开头（忽略大小写）
@@ -1521,6 +1585,12 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).v = strdup(arg_value);
 	} else if (strcmp(func_name, "sleep_toggle_monitor") == 0) {
 		func = sleep_toggle_monitor;
+		(*arg).v = strdup(arg_value);
+	} else if (strcmp(func_name, "set_inactive_gradient") == 0) {
+		func = setinactivegradient;
+		(*arg).v = strdup(arg_value);
+	} else if (strcmp(func_name, "set_active_gradient") == 0) {
+		func = setactivegradient;
 		(*arg).v = strdup(arg_value);
 	} else if (strcmp(func_name, "scroller_stack") == 0) {
 		func = scroller_stack;
@@ -2394,6 +2464,22 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		} else {
 			convert_hex_to_rgba(config->overlaycolor, color);
 		}
+	} else if (strcmp(key, "active_gradient") == 0) {
+		if (!parse_gradient(value, &config->active_gradient)) {
+			mango_error(false, WLR_ERROR,
+						"Invalid active_gradient "
+						"format: %s\n",
+						value);
+			return false;
+		}
+	} else if (strcmp(key, "inactive_gradient") == 0) {
+		if (!parse_gradient(value, &config->inactive_gradient)) {
+			mango_error(false, WLR_ERROR,
+						"Invalid inactive_gradient "
+						"format: %s\n",
+						value);
+			return false;
+		}
 	} else if (strcmp(key, "monitorrule") == 0) {
 		config->monitor_rules =
 			realloc(config->monitor_rules, (config->monitor_rules_count + 1) *
@@ -2844,7 +2930,11 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->noswallow = atoi(val);
 				} else if (strcmp(key, "noblur") == 0) {
 					rule->noblur = atoi(val);
-				} else if (strcmp(key, "scroller_proportion") == 0) {
+				} else if (strcmp(key, "active_gradient") == 0) {
+					parse_gradient(val, &rule->active_gradient);
+				} else if (strcmp(key, "inactive_gradient") == 0) {
+					parse_gradient(val, &rule->inactive_gradient);
+			    } else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
 					rule->isfullscreen = atoi(val);
@@ -3983,11 +4073,29 @@ void free_config(void) {
 			if (rule->globalkeybinding.arg.v) {
 				free((void *)rule->globalkeybinding.arg.v);
 			}
+			if (rule->active_gradient.stops)
+				free (rule->active_gradient.stops);
+			if (rule->inactive_gradient.stops)
+				free (rule->inactive_gradient.stops);
+			rule->active_gradient.stops = NULL;
+			rule->active_gradient.stopcount = 0;
+			rule->inactive_gradient.stops = NULL;
+			rule->inactive_gradient.stopcount = 0;
 		}
 		free(config.window_rules);
 		config.window_rules = NULL;
 		config.window_rules_count = 0;
 	}
+
+	// gradient borders
+	if (config.active_gradient.stops)
+		free(config.active_gradient.stops);
+	if (config.inactive_gradient.stops)
+		free (config.inactive_gradient.stops);
+	config.active_gradient.stops = NULL;
+	config.active_gradient.stopcount = 0;
+	config.inactive_gradient.stops = NULL;
+	config.inactive_gradient.stopcount = 0;
 
 	// 释放 device_rules
 	if (config.device_rules) {
