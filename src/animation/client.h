@@ -677,24 +677,29 @@ void client_draw_border(Client *c, struct ivec2 offsets) {
 	wlr_scene_rect_set_corner_radii(c->border, current_corner_location);
 	wlr_scene_rect_set_clipped_region(c->border, clipped_region);
 	texture_rerender(c);
-
 }
 
 static struct wlr_buffer *texture_rerender(Client *target) {
-	if (!target->texture) return NULL;
+	if (!target->texture)
+		return NULL;
 	const BorderTextureKey *current = client_current_texture(target);
 	if (texture_key_empty(current)) {
 		wlr_scene_node_set_enabled(&target->texture->node, false);
 		return NULL;
 	}
 	struct ivec2 offsets = compute_edge_offsets(target);
-	int32_t new_ring_width = GEZERO(target->animation.current.width - offsets.x - offsets.width);
-	int32_t new_ring_height = GEZERO(target->animation.current.height - offsets.y - offsets.height);
+	int32_t new_ring_width =
+		GEZERO(target->animation.current.width - offsets.x - offsets.width);
+	int32_t new_ring_height =
+		GEZERO(target->animation.current.height - offsets.y - offsets.height);
 
-	// early return current buffer if size is not actually changed to avoid re-render of gradient ring
-	// invalidate sets texture_size.width and texture_size.height to 0 to trigger this path
-	// gets bypassed with cache bypass
-	if (!texture_style_bypasses_cache(current->style) && target->texture_buf && new_ring_width == target->texture_size.width && new_ring_height == target->texture_size.height)
+	// early return current buffer if size is not actually changed to avoid
+	// re-render of gradient ring invalidate sets texture_size.width and
+	// texture_size.height to 0 to trigger this path gets bypassed with cache
+	// bypass
+	if (!texture_style_bypasses_cache(current->style) && target->texture_buf &&
+		new_ring_width == target->texture_size.width &&
+		new_ring_height == target->texture_size.height)
 		return target->texture_buf;
 
 	bool from_cache;
@@ -704,8 +709,10 @@ static struct wlr_buffer *texture_rerender(Client *target) {
 		return NULL;
 	}
 
-	struct wlr_buffer *new_ring = texture_make_ring(canvas, new_ring_width, new_ring_height, (int32_t)target->bw, config.border_radius);
-	
+	struct wlr_buffer *new_ring =
+		texture_make_ring(canvas, new_ring_width, new_ring_height,
+						  (int32_t)target->bw, config.border_radius);
+
 	// free canvas if cache bypass is enabled to avoid memleak
 	if (!from_cache)
 		wlr_buffer_drop(canvas);
@@ -714,7 +721,7 @@ static struct wlr_buffer *texture_rerender(Client *target) {
 		wlr_scene_node_set_enabled(&target->texture->node, false);
 		return NULL;
 	}
-	
+
 	if (target->texture_buf)
 		wlr_buffer_drop(target->texture_buf);
 
@@ -722,18 +729,18 @@ static struct wlr_buffer *texture_rerender(Client *target) {
 	target->texture_size.width = new_ring_width;
 	target->texture_size.height = new_ring_height;
 
-	
 	wlr_scene_node_set_enabled(&target->texture->node, true);
 	wlr_scene_buffer_set_buffer(target->texture, new_ring);
 	wlr_scene_node_set_position(&target->texture->node, offsets.x, offsets.y);
-	wlr_scene_buffer_set_corner_radii(target->texture,
-		target->isfullscreen || (config.no_radius_when_single && target->mon && target->mon->visible_tiling_clients == 1)
-			? corner_radii_none(): set_client_corner_location(target));
+	wlr_scene_buffer_set_corner_radii(
+		target->texture,
+		target->isfullscreen || (config.no_radius_when_single && target->mon &&
+								 target->mon->visible_tiling_clients == 1)
+			? corner_radii_none()
+			: set_client_corner_location(target));
 	wlr_scene_node_raise_to_top(&target->texture->node);
 
 	return new_ring;
-	
-
 }
 
 struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box,

@@ -91,4 +91,3 @@ void dwindle_toggle_current_split(const Arg *arg);
 void focusid(const Arg *arg);
 void setactivegradient(const Arg *arg);
 void setinactivegradient(const Arg *arg);
-

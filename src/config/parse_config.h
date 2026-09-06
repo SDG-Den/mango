@@ -831,8 +831,8 @@ static bool parse_gradient(const char *input, GradientBorder *output) {
 		}
 		if (output->stopcount == stopcapacity) {
 			stopcapacity = stopcapacity == 0 ? 4 : stopcapacity * 2;
-			GradientStop *grown = 
-				realloc(output->stops, (size_t)stopcapacity * sizeof(GradientStop));
+			GradientStop *grown = realloc(
+				output->stops, (size_t)stopcapacity * sizeof(GradientStop));
 			if (!grown) {
 				free(copy);
 				free(output->stops);
@@ -849,7 +849,6 @@ static bool parse_gradient(const char *input, GradientBorder *output) {
 			stop->degree += 360.0f;
 
 		token = strtok_r(NULL, "|", &pointer);
-
 	}
 	free(copy);
 	return true;
@@ -4078,9 +4077,9 @@ void free_config(void) {
 				free((void *)rule->globalkeybinding.arg.v);
 			}
 			if (rule->active_texture.gradient.stops)
-				free (rule->active_texture.gradient.stops);
+				free(rule->active_texture.gradient.stops);
 			if (rule->inactive_texture.gradient.stops)
-				free (rule->inactive_texture.gradient.stops);
+				free(rule->inactive_texture.gradient.stops);
 			rule->active_texture.gradient.stops = NULL;
 			rule->active_texture.gradient.stopcount = 0;
 			rule->inactive_texture.gradient.stops = NULL;
@@ -4095,7 +4094,7 @@ void free_config(void) {
 	if (config.active_texture.gradient.stops)
 		free(config.active_texture.gradient.stops);
 	if (config.inactive_texture.gradient.stops)
-		free (config.inactive_texture.gradient.stops);
+		free(config.inactive_texture.gradient.stops);
 	config.active_texture.gradient.stops = NULL;
 	config.active_texture.gradient.stopcount = 0;
 	config.inactive_texture.gradient.stops = NULL;

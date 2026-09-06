@@ -363,7 +363,7 @@ struct Client {
 	Monitor *mon;
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border; /* top, bottom, left, right */
-BorderTextureKey active_texture;
+	BorderTextureKey active_texture;
 	BorderTextureKey inactive_texture;
 	struct wlr_buffer *texture_buf;
 	struct wlr_box texture_size;
@@ -789,7 +789,8 @@ static void focusclient(Client *c, int32_t lift);
 
 static void setborder_color(Client *c);
 static void client_clear_texture(BorderTextureKey *texture);
-static void client_set_texture(Client *target, bool state, const BorderTextureKey *source);
+static void client_set_texture(Client *target, bool state,
+							   const BorderTextureKey *source);
 static struct wlr_buffer *texture_rerender(Client *target);
 static void texture_cache_teardown(void);
 static void texture_collect_garbage(void);
@@ -1363,7 +1364,6 @@ static void ipc_notify_device_event(struct wlr_input_device *device);
 #include "input/device.h"
 #include "manage/misc.h"
 
-
 void handlesig(int32_t signo) {
 	if (signo == SIGCHLD)
 		while (waitpid(-1, NULL, WNOHANG) > 0)
@@ -1575,7 +1575,7 @@ run(char *startup_cmd, int readiness_fd) {
 	 */
 	if (readiness_fd > 2) {
 		ssize_t written = write(readiness_fd, "\n", 1);
-		(void) written;
+		(void)written;
 		close(readiness_fd);
 	}
 

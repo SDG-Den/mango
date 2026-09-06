@@ -291,8 +291,10 @@ static void client_clear_texture(BorderTextureKey *texture) {
 	texture_key_destroy(texture);
 }
 
-static void client_set_texture(Client *target, bool state, const BorderTextureKey *source) {
-	BorderTextureKey *target_texture = state ? &target->active_texture : &target->inactive_texture;
+static void client_set_texture(Client *target, bool state,
+							   const BorderTextureKey *source) {
+	BorderTextureKey *target_texture =
+		state ? &target->active_texture : &target->inactive_texture;
 	client_clear_texture(target_texture);
 	if (!source || texture_key_empty(source))
 		return;
@@ -305,18 +307,13 @@ static const BorderTextureKey *client_current_texture(const Client *c) {
 	return &c->inactive_texture;
 }
 
-
 static void client_texture_invalidate(Client *c) {
 	c->texture_size.width = 0;
 	c->texture_size.height = 0;
 	texture_rerender(c);
 }
 
-
-
-
-static void client_texture_from_string(Client *c, bool state, const char *s)
-{
+static void client_texture_from_string(Client *c, bool state, const char *s) {
 	if (s && s[0] != '\0') {
 		BorderTextureKey parsed = {0};
 		if (!parse_gradient(s, &parsed.gradient))
@@ -324,8 +321,9 @@ static void client_texture_from_string(Client *c, bool state, const char *s)
 		parsed.style = TEXTURE_GRADIENT;
 		client_set_texture(c, state, &parsed);
 	} else {
-		client_set_texture(c, state, state ? &config.active_texture
-		                                   : &config.inactive_texture);
+		client_set_texture(c, state,
+						   state ? &config.active_texture
+								 : &config.inactive_texture);
 	}
 	client_texture_invalidate(c);
 }
@@ -1842,8 +1840,7 @@ void init_client_properties(Client *c) {
 }
 
 static bool texture_no_input(struct wlr_scene_buffer *buffer, double *sx,
-							  double *sy)
-{
+							 double *sy) {
 	(void)buffer;
 	(void)sx;
 	(void)sy;
@@ -2476,7 +2473,8 @@ void focusclient(Client *c, int32_t lift) {
 		if (last_focus_client && last_focus_client != c)
 			client_texture_invalidate(last_focus_client);
 		client_texture_invalidate(c);
-		// might need disable if it causes performance issues, GC every focus change.
+		// might need disable if it causes performance issues, GC every focus
+		// change.
 		texture_collect_garbage();
 
 		// decide whether need to re-arrange
