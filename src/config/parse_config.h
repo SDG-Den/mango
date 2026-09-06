@@ -1585,12 +1585,14 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	} else if (strcmp(func_name, "sleep_toggle_monitor") == 0) {
 		func = sleep_toggle_monitor;
 		(*arg).v = strdup(arg_value);
-	} else if (strcmp(func_name, "set_inactive_gradient") == 0) {
-		func = setinactivegradient;
+	} else if (strcmp(func_name, "set_inactive_texture") == 0) {
+		func = setinactivetexture;
 		(*arg).v = strdup(arg_value);
-	} else if (strcmp(func_name, "set_active_gradient") == 0) {
-		func = setactivegradient;
+		(*arg).v2 = strdup(arg_value2);
+	} else if (strcmp(func_name, "set_active_texture") == 0) {
+		func = setactivetexture;
 		(*arg).v = strdup(arg_value);
+		(*arg).v2 = strdup(arg_value2);
 	} else if (strcmp(func_name, "scroller_stack") == 0) {
 		func = scroller_stack;
 		(*arg).i = parse_direction(arg_value);
@@ -2463,24 +2465,22 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		} else {
 			convert_hex_to_rgba(config->overlaycolor, color);
 		}
-	} else if (strcmp(key, "active_gradient") == 0) {
-		if (!parse_gradient(value, &config->active_texture.gradient)) {
+	} else if (strcmp(key, "active_texture") == 0) {
+		if (!texture_parse_value(value, &config->active_texture)) {
 			mango_error(false, WLR_ERROR,
-						"Invalid active_gradient "
+						"Invalid active_texture "
 						"format: %s\n",
 						value);
 			return false;
 		}
-		config->active_texture.style = TEXTURE_GRADIENT;
-	} else if (strcmp(key, "inactive_gradient") == 0) {
-		if (!parse_gradient(value, &config->inactive_texture.gradient)) {
+	} else if (strcmp(key, "inactive_texture") == 0) {
+		if (!texture_parse_value(value, &config->inactive_texture)) {
 			mango_error(false, WLR_ERROR,
-						"Invalid inactive_gradient "
+						"Invalid inactive_texture "
 						"format: %s\n",
 						value);
 			return false;
 		}
-		config->inactive_texture.style = TEXTURE_GRADIENT;
 	} else if (strcmp(key, "monitorrule") == 0) {
 		config->monitor_rules =
 			realloc(config->monitor_rules, (config->monitor_rules_count + 1) *
@@ -2931,12 +2931,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->noswallow = atoi(val);
 				} else if (strcmp(key, "noblur") == 0) {
 					rule->noblur = atoi(val);
-				} else if (strcmp(key, "active_gradient") == 0) {
-					parse_gradient(val, &rule->active_texture.gradient);
-					rule->active_texture.style = TEXTURE_GRADIENT;
-				} else if (strcmp(key, "inactive_gradient") == 0) {
-					parse_gradient(val, &rule->inactive_texture.gradient);
-					rule->inactive_texture.style = TEXTURE_GRADIENT;
+				} else if (strcmp(key, "active_texture") == 0) {
+					texture_parse_value(val, &rule->active_texture);
+				} else if (strcmp(key, "inactive_texture") == 0) {
+					texture_parse_value(val, &rule->inactive_texture);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
@@ -4086,6 +4084,7 @@ void free_config(void) {
 			rule->inactive_texture.gradient.stopcount = 0;
 		}
 		free(config.window_rules);
+		
 		config.window_rules = NULL;
 		config.window_rules_count = 0;
 	}
@@ -4099,6 +4098,8 @@ void free_config(void) {
 	config.active_texture.gradient.stopcount = 0;
 	config.inactive_texture.gradient.stops = NULL;
 	config.inactive_texture.gradient.stopcount = 0;
+	free(config.active_texture.string);
+	free(config.inactive_texture.string);
 
 	// 释放 device_rules
 	if (config.device_rules) {

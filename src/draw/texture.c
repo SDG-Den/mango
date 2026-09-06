@@ -23,6 +23,17 @@ struct TextureCacheEntry {
 	uint32_t use_count;
 };
 
+typedef struct {
+	const char *name;
+	TextureStyle style;
+} TextureStyleName;
+
+// define texture style names
+static const TextureStyleName texture_style_names[] = {
+	{ "linear_gradient", TEXTURE_LINEAR_GRADIENT },
+};
+
+
 static struct TextureCacheEntry *texture_cache = NULL;
 static size_t texture_cache_count = 0;
 static size_t texture_cache_cap = 0;
@@ -64,6 +75,42 @@ static void max_needed_canvas_size(int *width, int *height) {
 			*height = monitor->m.height;
 	}
 }
+
+// rgba helper
+static bool texture_rgba_from_hex(const char *hex, float rgba[4]) {
+	if (hex == NULL || *hex == '\0')
+		return false;
+	char *end = NULL;
+	long long value = strtoll(hex, &end, 16);
+	if (end == hex || *end != '\0')
+		return false;
+	rgba[0] = ((value >> 24) & 0xFF) / 255.0f;
+	rgba[1] = ((value >> 16) & 0xFF) / 255.0f;
+	rgba[2] = ((value >> 8) & 0xFF) / 255.0f;
+	rgba[3] = (value & 0xFF) / 255.0f;
+	return true;
+}
+//parser
+static bool texture_parse_two_colors(const char *input, float colors[2][4], float *param) {
+	if (input == NULL)
+		return false;
+	char *copy = strdup(input);
+	if (copy == NULL)
+		return false;
+	char *save = NULL;
+	char *color1 = strtok_r(copy, "|", &save);
+	char *color2 = strtok_r(NULL, "|", &save);
+	char *param_str = strtok_r(NULL, "|", &save);
+	bool parsed = color1 && color2 && param_str
+		&& texture_rgba_from_hex(color1, colors[0])
+		&& texture_rgba_from_hex(color2, colors[1]);
+	if (parsed)
+		*param = strtof(param_str, NULL);
+	free(copy);
+	return parsed;
+}
+
+
 
 // cairo/general border draw stuff
 static void cairo_rounded_rect(cairo_t *render, double x, double y, double w,
@@ -166,6 +213,7 @@ static void gradient_key_destroy(BorderTextureKey *key) {
 	key->gradient.stopcount = 0;
 }
 
+// old gradient
 static struct wlr_buffer *texture_render_gradient(const BorderTextureKey *key,
 												  Client *target) {
 	(void)target;
@@ -211,6 +259,49 @@ static struct wlr_buffer *texture_render_gradient(const BorderTextureKey *key,
 
 	cairo_pattern_destroy(pattern);
 	cairo_destroy(create);
+
+	return &buf->base;
+}
+
+// linear gradient
+static struct wlr_buffer *texture_render_linear(const BorderTextureKey *key, Client *target) {
+	if (key == NULL || target == NULL)
+		return NULL;
+	float colors[2][4];
+	float degree;
+	if (!texture_parse_two_colors(key->string, colors, &degree))
+		return NULL;
+
+	int32_t width = target->animation.current.width;
+	int32_t height = target->animation.current.height;
+	if (width <= 0 || height <= 0)
+		return NULL;
+
+	struct texture_image_buffer *buf = calloc(1, sizeof(*buf));
+	if (buf == NULL)
+		return NULL;
+	buf->surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	wlr_buffer_init(&buf->base, &texture_buffer_impl, width, height);
+
+	double radians = degree * M_PI / 180.0;
+	double length = hypot((double)width, (double)height) / 2.0;
+	double cx = width / 2.0;
+	double cy = height / 2.0;
+	double dx = sin(radians) * length;
+	double dy = cos(radians) * length;
+
+	cairo_t *render = cairo_create(buf->surface);
+	cairo_pattern_t *pattern =
+		cairo_pattern_create_linear(cx - dx, cy - dy, cx + dx, cy + dy);
+	cairo_pattern_add_color_stop_rgba(pattern, 0.0,
+		colors[0][0], colors[0][1], colors[0][2], colors[0][3]);
+	cairo_pattern_add_color_stop_rgba(pattern, 1.0,
+		colors[1][0], colors[1][1], colors[1][2], colors[1][3]);
+	cairo_rectangle(render, 0, 0, width, height);
+	cairo_set_source(render, pattern);
+	cairo_fill(render);
+	cairo_pattern_destroy(pattern);
+	cairo_destroy(render);
 
 	return &buf->base;
 }
@@ -380,16 +471,80 @@ static void texture_cache_teardown(void) {
 	texture_cache_cap = 0;
 }
 
+static TextureStyle texture_style_from_name(const char *name) {
+	for (size_t index = 0; index < sizeof(texture_style_names) / sizeof(texture_style_names[0]); ++index) {
+		if (strcmp(name, texture_style_names[index].name) == 0)
+			return texture_style_names[index].style;
+	}
+	return TEXTURE_STYLE_COUNT;
+}
+
+static bool texture_parse_value(const char *value, BorderTextureKey *out) {
+	const char *comma = strchr(value, ',');
+	if (comma == NULL)
+		return false;
+	char *type = strndup(value, comma - value);
+	if (type == NULL)
+		return false;
+	TextureStyle style = texture_style_from_name(type);
+	free(type);
+	if (style == TEXTURE_STYLE_COUNT)
+		return false;
+	free(out->string);
+	out->style = style;
+	out->string = strdup(comma + 1);
+	return out->string != NULL;
+}
+
+//  string texture key helpers
+static bool string_key_empty(const BorderTextureKey *key) {
+	return key->string == NULL || key->string[0] == '\0';
+}
+
+static bool string_key_equal(const BorderTextureKey *a,
+							  const BorderTextureKey *b) {
+	if (a->style != b->style)
+		return false;
+	if (a->string == NULL || b->string == NULL)
+		return a->string == b->string;
+	return strcmp(a->string, b->string) == 0;
+}
+
+
+static bool string_key_copy(const BorderTextureKey *source,
+							 BorderTextureKey *destination) {
+	destination->style = source->style;
+	destination->string = NULL;
+	if (source->string == NULL)
+		return true;
+
+	destination->string = strdup(source->string);
+	return destination->string != NULL;
+}
+
+static void string_key_destroy(BorderTextureKey *key) {
+	free(key->string);
+	key->string = NULL;
+}
+
 // register texture styles here
 
 void init_texture_system(void) {
+	struct TextureOps linear_gradient_ops = {
+		.key_empty = string_key_empty,
+		.key_equal = string_key_equal,
+		.key_copy = string_key_copy,
+		.key_destroy = string_key_destroy,
+		.bypass_cache = true,
+		.render = texture_render_linear,
+	};
 	struct TextureOps gradient_ops = {
 		.key_empty = gradient_key_empty,
 		.key_equal = gradient_key_equal,
 		.key_copy = gradient_key_copy,
 		.key_destroy = gradient_key_destroy,
-		.bypass_cache = false,
 		.render = texture_render_gradient,
 	};
 	texture_style_register(TEXTURE_GRADIENT, gradient_ops);
+	texture_style_register(TEXTURE_LINEAR_GRADIENT, linear_gradient_ops);
 }

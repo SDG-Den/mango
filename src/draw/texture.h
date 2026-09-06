@@ -19,6 +19,7 @@ typedef struct {
 
 typedef enum {
 	TEXTURE_GRADIENT,
+	TEXTURE_LINEAR_GRADIENT,
 	TEXTURE_STYLE_COUNT,
 } TextureStyle;
 

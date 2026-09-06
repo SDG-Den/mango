@@ -313,13 +313,19 @@ static void client_texture_invalidate(Client *c) {
 	texture_rerender(c);
 }
 
-static void client_texture_from_string(Client *c, bool state, const char *s) {
-	if (s && s[0] != '\0') {
+static void client_texture_from_string(Client *c, bool state, const char *type, const char *opt) {
+	opt = opt ? opt : "";
+	if (type && type[0] != '\0') {
+		size_t length = strlen(type) + 1 + strlen(opt) + 1;
+		char *value = malloc(length);
+		snprintf(value, length, "%s,%s", type, opt);
 		BorderTextureKey parsed = {0};
-		if (!parse_gradient(s, &parsed.gradient))
-			return;
-		parsed.style = TEXTURE_GRADIENT;
-		client_set_texture(c, state, &parsed);
+		bool success = texture_parse_value(value, &parsed);
+		free(value);
+		if (success) {
+			client_set_texture(c, state, &parsed);
+			texture_key_destroy(&parsed);
+		}
 	} else {
 		client_set_texture(c, state,
 						   state ? &config.active_texture

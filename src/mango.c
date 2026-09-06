@@ -795,7 +795,7 @@ static struct wlr_buffer *texture_rerender(Client *target);
 static void texture_cache_teardown(void);
 static void texture_collect_garbage(void);
 static const BorderTextureKey *client_current_texture(const Client *c);
-static void client_texture_from_string(Client *c, bool state, const char *s);
+static void client_texture_from_string(Client *c, bool state, const char *type, const char *opt);
 static Client *focustop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);

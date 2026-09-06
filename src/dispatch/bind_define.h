@@ -2226,16 +2226,16 @@ void scroller_stack(const Arg *arg) {
 
 	scroller_apply_stack(c, target_client, arg->i);
 }
-void setactivegradient(const Arg *arg) {
+void setactivetexture(const Arg *arg) {
 	Client *c = arg->tc ? arg->tc : selmon ? selmon->sel : NULL;
 	if (c)
-		client_texture_from_string(c, true, arg->v);
+		client_texture_from_string(c, true, arg->v, arg->v2);
 	texture_collect_garbage();
 }
-void setinactivegradient(const Arg *arg) {
+void setinactivetexture(const Arg *arg) {
 	Client *c = arg->tc ? arg->tc : selmon ? selmon->sel : NULL;
 	if (c)
-		client_texture_from_string(c, false, arg->v);
+		client_texture_from_string(c, false, arg->v, arg->v2);
 	texture_collect_garbage();
 }
 
