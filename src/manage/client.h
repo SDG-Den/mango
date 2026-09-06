@@ -287,53 +287,47 @@ static void client_send_close(Client *c) {
 static void client_set_border_color(Client *c, const float color[static 4]) {
 	wlr_scene_rect_set_color(c->border, color);
 }
-static void client_clear_gradient(GradientBorder *gradient) {
-	free (gradient->stops);
-	gradient->stops = NULL;
-	gradient->stopcount = 0;
+static void client_clear_texture(BorderTextureKey *texture) {
+	texture_key_destroy(texture);
 }
 
-static void client_set_gradient(Client *target, bool state, const GradientBorder *source) {
-	GradientBorder *targetgrad = state ? &target->active_gradient : &target->inactive_gradient;
-	client_clear_gradient(targetgrad);
-	if (!source || source->stopcount <= 0)
+static void client_set_texture(Client *target, bool state, const BorderTextureKey *source) {
+	BorderTextureKey *target_texture = state ? &target->active_texture : &target->inactive_texture;
+	client_clear_texture(target_texture);
+	if (!source || texture_key_empty(source))
 		return;
-
-	targetgrad->stops = malloc((size_t)source->stopcount * sizeof(GradientStop));
-	if (!targetgrad->stops)
-		return;
-	targetgrad->stopcount = source->stopcount;
-	memcpy(targetgrad->stops, source->stops, (size_t)source->stopcount * sizeof(GradientStop));
+	texture_key_copy(source, target_texture);
 }
 
-static const GradientBorder *client_current_gradient(const Client *c) {
+static const BorderTextureKey *client_current_texture(const Client *c) {
 	if (selmon && c == selmon->sel)
-		return &c->active_gradient;
-	return &c->inactive_gradient;
+		return &c->active_texture;
+	return &c->inactive_texture;
 }
 
 
-static void client_gradient_invalidate(Client *c) {
-	c->gradient_size.width = 0;
-	c->gradient_size.height = 0;
-	gradient_rerender(c);
+static void client_texture_invalidate(Client *c) {
+	c->texture_size.width = 0;
+	c->texture_size.height = 0;
+	texture_rerender(c);
 }
 
 
 
 
-static void client_gradient_from_string(Client *c, bool state, const char *s)
+static void client_texture_from_string(Client *c, bool state, const char *s)
 {
 	if (s && s[0] != '\0') {
-		GradientBorder parsed = {0};
-		if (!parse_gradient(s, &parsed))
+		BorderTextureKey parsed = {0};
+		if (!parse_gradient(s, &parsed.gradient))
 			return;
-		client_set_gradient(c, state, &parsed);
+		parsed.style = TEXTURE_GRADIENT;
+		client_set_texture(c, state, &parsed);
 	} else {
-		client_set_gradient(c, state, state ? &config.active_gradient
-		                                   : &config.inactive_gradient);
+		client_set_texture(c, state, state ? &config.active_texture
+		                                   : &config.inactive_texture);
 	}
-	client_gradient_invalidate(c);
+	client_texture_invalidate(c);
 }
 
 static void client_set_fullscreen(Client *c, int32_t fullscreen) {
@@ -1224,10 +1218,10 @@ static void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 
 	APPLY_STRING_PROP(c, r, animation_type_open);
 	APPLY_STRING_PROP(c, r, animation_type_close);
-	if (r->active_gradient.stopcount > 0)
-		client_set_gradient(c, true, &r->active_gradient);
-	if (r->inactive_gradient.stopcount > 0)
-		client_set_gradient(c, false, &r->inactive_gradient);
+	if (!texture_key_empty(&r->active_texture))
+		client_set_texture(c, true, &r->active_texture);
+	if (!texture_key_empty(&r->inactive_texture))
+		client_set_texture(c, false, &r->inactive_texture);
 }
 
 void set_float_malposition(Client *tc) {
@@ -1308,8 +1302,8 @@ void applyrules(Client *c) {
 		return;
 
 	// seed gradient from global defaults
-	client_set_gradient(c, true, &config.active_gradient);
-	client_set_gradient(c, false, &config.inactive_gradient);
+	client_set_texture(c, true, &config.active_texture);
+	client_set_texture(c, false, &config.inactive_texture);
 
 	parent = client_get_parent(c);
 
@@ -1847,7 +1841,7 @@ void init_client_properties(Client *c) {
 	wl_list_init(&c->flink);
 }
 
-static bool gradient_no_input(struct wlr_scene_buffer *buffer, double *sx,
+static bool texture_no_input(struct wlr_scene_buffer *buffer, double *sx,
 							  double *sy)
 {
 	(void)buffer;
@@ -1949,10 +1943,10 @@ mapnotify(struct wl_listener *listener, void *data) {
 									corner_radii_all(config.border_radius));
 	wlr_scene_node_set_enabled(&c->border->node, true);
 
-	c->gradient = wlr_scene_buffer_create(c->scene, NULL);
-	c->gradient->node.data = c;
-	c->gradient->point_accepts_input = gradient_no_input;
-	wlr_scene_node_raise_to_top(&c->gradient->node);
+	c->texture = wlr_scene_buffer_create(c->scene, NULL);
+	c->texture->node.data = c;
+	c->texture->point_accepts_input = texture_no_input;
+	wlr_scene_node_raise_to_top(&c->texture->node);
 
 	c->shadow =
 		wlr_scene_shadow_create(c->scene, 0, 0, config.border_radius,
@@ -2242,10 +2236,10 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	init_client_properties(c);
 
 	wlr_scene_node_destroy(&c->scene->node);
-	c->gradient = NULL;
+	c->texture = NULL;
 	printstatus(IPC_WATCH_ARRANGGE);
 	motionnotify(0, NULL, 0, 0, 0, 0);
-	gradient_collect_garbage();
+	texture_collect_garbage();
 }
 
 void // 0.7 custom
@@ -2279,11 +2273,11 @@ destroynotify(struct wl_listener *listener, void *data) {
 		wl_list_remove(&c->set_decoration_mode.link);
 	}
 	switcher_remove_client(c);
-	client_clear_gradient(&c->active_gradient);
-	client_clear_gradient(&c->inactive_gradient);
-	wlr_buffer_drop(c->gradient_buf);
-	if (c->gradient)
-		wlr_scene_node_destroy(&c->gradient->node);
+	client_clear_texture(&c->active_texture);
+	client_clear_texture(&c->inactive_texture);
+	wlr_buffer_drop(c->texture_buf);
+	if (c->texture)
+		wlr_scene_node_destroy(&c->texture->node);
 	free(c);
 }
 
@@ -2464,8 +2458,8 @@ void focusclient(Client *c, int32_t lift) {
 		selmon->prevsel = selmon->sel;
 		selmon->sel = c;
 		if (last_focus_client && last_focus_client != c)
-			client_gradient_invalidate(last_focus_client);
-		client_gradient_invalidate(c);
+			client_texture_invalidate(last_focus_client);
+		client_texture_invalidate(c);
 		c->isfocusing = true;
 
 		check_keep_idle_inhibit(c);
@@ -2480,10 +2474,10 @@ void focusclient(Client *c, int32_t lift) {
 		client_set_focused_opacity_animation(c);
 
 		if (last_focus_client && last_focus_client != c)
-			client_gradient_invalidate(last_focus_client);
-		client_gradient_invalidate(c);
+			client_texture_invalidate(last_focus_client);
+		client_texture_invalidate(c);
 		// might need disable if it causes performance issues, GC every focus change.
-		gradient_collect_garbage();
+		texture_collect_garbage();
 
 		// decide whether need to re-arrange
 

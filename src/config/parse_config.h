@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include "../draw/gradient.h"
+#include "../draw/texture.h"
 void convert_hex_to_rgba(float *color, uint32_t hex);
 
 #ifndef SYSCONFDIR
@@ -116,8 +116,8 @@ typedef struct {
 	uint32_t passmod;
 	xkb_keysym_t keysym;
 	KeyBinding globalkeybinding;
-	GradientBorder active_gradient;
-	GradientBorder inactive_gradient;
+	BorderTextureKey active_texture;
+	BorderTextureKey inactive_texture;
 } ConfigWinRule;
 
 typedef struct {
@@ -455,8 +455,8 @@ typedef struct {
 	float scratchpadcolor[4];
 	float globalcolor[4];
 	float overlaycolor[4];
-	GradientBorder active_gradient;
-	GradientBorder inactive_gradient;
+	BorderTextureKey active_texture;
+	BorderTextureKey inactive_texture;
 
 	int32_t log_level;
 	uint32_t capslock;
@@ -2465,21 +2465,23 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 			convert_hex_to_rgba(config->overlaycolor, color);
 		}
 	} else if (strcmp(key, "active_gradient") == 0) {
-		if (!parse_gradient(value, &config->active_gradient)) {
+		if (!parse_gradient(value, &config->active_texture.gradient)) {
 			mango_error(false, WLR_ERROR,
 						"Invalid active_gradient "
 						"format: %s\n",
 						value);
 			return false;
 		}
+		config->active_texture.style = TEXTURE_GRADIENT;
 	} else if (strcmp(key, "inactive_gradient") == 0) {
-		if (!parse_gradient(value, &config->inactive_gradient)) {
+		if (!parse_gradient(value, &config->inactive_texture.gradient)) {
 			mango_error(false, WLR_ERROR,
 						"Invalid inactive_gradient "
 						"format: %s\n",
 						value);
 			return false;
 		}
+		config->inactive_texture.style = TEXTURE_GRADIENT;
 	} else if (strcmp(key, "monitorrule") == 0) {
 		config->monitor_rules =
 			realloc(config->monitor_rules, (config->monitor_rules_count + 1) *
@@ -2931,10 +2933,12 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 				} else if (strcmp(key, "noblur") == 0) {
 					rule->noblur = atoi(val);
 				} else if (strcmp(key, "active_gradient") == 0) {
-					parse_gradient(val, &rule->active_gradient);
+					parse_gradient(val, &rule->active_texture.gradient);
+					rule->active_texture.style = TEXTURE_GRADIENT;
 				} else if (strcmp(key, "inactive_gradient") == 0) {
-					parse_gradient(val, &rule->inactive_gradient);
-			    } else if (strcmp(key, "scroller_proportion") == 0) {
+					parse_gradient(val, &rule->inactive_texture.gradient);
+					rule->inactive_texture.style = TEXTURE_GRADIENT;
+				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
 					rule->isfullscreen = atoi(val);
@@ -4073,29 +4077,29 @@ void free_config(void) {
 			if (rule->globalkeybinding.arg.v) {
 				free((void *)rule->globalkeybinding.arg.v);
 			}
-			if (rule->active_gradient.stops)
-				free (rule->active_gradient.stops);
-			if (rule->inactive_gradient.stops)
-				free (rule->inactive_gradient.stops);
-			rule->active_gradient.stops = NULL;
-			rule->active_gradient.stopcount = 0;
-			rule->inactive_gradient.stops = NULL;
-			rule->inactive_gradient.stopcount = 0;
+			if (rule->active_texture.gradient.stops)
+				free (rule->active_texture.gradient.stops);
+			if (rule->inactive_texture.gradient.stops)
+				free (rule->inactive_texture.gradient.stops);
+			rule->active_texture.gradient.stops = NULL;
+			rule->active_texture.gradient.stopcount = 0;
+			rule->inactive_texture.gradient.stops = NULL;
+			rule->inactive_texture.gradient.stopcount = 0;
 		}
 		free(config.window_rules);
 		config.window_rules = NULL;
 		config.window_rules_count = 0;
 	}
 
-	// gradient borders
-	if (config.active_gradient.stops)
-		free(config.active_gradient.stops);
-	if (config.inactive_gradient.stops)
-		free (config.inactive_gradient.stops);
-	config.active_gradient.stops = NULL;
-	config.active_gradient.stopcount = 0;
-	config.inactive_gradient.stops = NULL;
-	config.inactive_gradient.stopcount = 0;
+	// border textures
+	if (config.active_texture.gradient.stops)
+		free(config.active_texture.gradient.stops);
+	if (config.inactive_texture.gradient.stops)
+		free (config.inactive_texture.gradient.stops);
+	config.active_texture.gradient.stops = NULL;
+	config.active_texture.gradient.stopcount = 0;
+	config.inactive_texture.gradient.stops = NULL;
+	config.inactive_texture.gradient.stopcount = 0;
 
 	// 释放 device_rules
 	if (config.device_rules) {

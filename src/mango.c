@@ -108,7 +108,7 @@
 #include "common/log.h"
 #include "common/util.h"
 #include "draw/text-node.h"
-#include "draw/gradient.h"
+#include "draw/texture.h"
 
 /* macros */
 #define MANGO_MAX(A, B) ((A) > (B) ? (A) : (B))
@@ -363,11 +363,11 @@ struct Client {
 	Monitor *mon;
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border; /* top, bottom, left, right */
-	GradientBorder active_gradient;
-	GradientBorder inactive_gradient;
-	struct wlr_buffer *gradient_buf;
-	struct wlr_box gradient_size;
-	struct wlr_scene_buffer *gradient;
+BorderTextureKey active_texture;
+	BorderTextureKey inactive_texture;
+	struct wlr_buffer *texture_buf;
+	struct wlr_box texture_size;
+	struct wlr_scene_buffer *texture;
 	struct wlr_scene_rect *droparea;
 	struct wlr_scene_rect *splitindicator[4];
 	struct wlr_scene_shadow *shadow;
@@ -788,13 +788,13 @@ static void focuslayer(LayerSurface *l);
 static void focusclient(Client *c, int32_t lift);
 
 static void setborder_color(Client *c);
-static void client_clear_gradient(GradientBorder *gradient);
-static void client_set_gradient(Client *target, bool state, const GradientBorder *source);
-static struct wlr_buffer *gradient_rerender(Client *target);
-static void gradient_cache_teardown(void);
-static void gradient_collect_garbage(void);
-static const GradientBorder *client_current_gradient(const Client *c);
-static void client_gradient_from_string(Client *c, bool state, const char *s);
+static void client_clear_texture(BorderTextureKey *texture);
+static void client_set_texture(Client *target, bool state, const BorderTextureKey *source);
+static struct wlr_buffer *texture_rerender(Client *target);
+static void texture_cache_teardown(void);
+static void texture_collect_garbage(void);
+static const BorderTextureKey *client_current_texture(const Client *c);
+static void client_texture_from_string(Client *c, bool state, const char *s);
 static Client *focustop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
@@ -1246,7 +1246,7 @@ static struct {
 	int32_t hotspot_y;
 } last_cursor;
 
-#include "draw/gradient.c"
+#include "draw/texture.c"
 #include "config/preset.h"
 struct Pertag {
 	uint32_t curtag, prevtag;
@@ -1465,7 +1465,7 @@ void cleanup(void) {
 	wlr_scene_node_destroy(&scene->tree.node);
 
 	mango_text_global_finish();
-	gradient_cache_teardown();
+	texture_cache_teardown();
 }
 
 // 修改printstatus函数，接受掩码参数
@@ -1597,6 +1597,7 @@ void setup(void) {
 	if (cli_debug_log) {
 		config.log_level = WLR_DEBUG;
 	}
+	init_texture_system();
 	init_baked_points();
 
 	set_env_without_display();
