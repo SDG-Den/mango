@@ -1,3 +1,17 @@
+/* ============================================================
+ * input/keyboard.h — keyboard device creation, keymap management, and the
+ * keybinding dispatch path.
+ *
+ *   createkeyboard()      — wrap a libinput keyboard; shared ones join the
+ *                          single wlr_keyboard_group (kb_group); per-rule ones
+ *                          get a standalone keymap.
+ *   createkeyboardgroup() — build the seat's keyboard group + xkb keymap.
+ *   keypress()            — translate libinput keycode->xkb keysyms, then call
+ *                          keybinding() to match mods+keysym against the
+ *                          configured bindings and invoke the action.
+ *   keybinding()          — the actual binding matcher (mode/mods/key/flags).
+ * ============================================================ */
+
 static void ipc_key_watch_notify(struct wl_listener *listener, void *data) {
 	InputDevice *id = wl_container_of(listener, id, key_watch);
 	ipc_notify_device_event(id->wlr_device);
@@ -464,6 +478,12 @@ done:
 	return reset;
 }
 
+/* keypress — the core key handler (wired to the keyboard group's key event).
+ * Converts the libinput keycode (+8) to xkb keysyms, computes the modifier
+ * mask, handles overview/jump-mode shortcuts, then loops each keysym calling
+ * keybinding(). If a binding consumes the key it arms key-repeat; otherwise
+ * the key falls through to global keybindings and finally to the focused
+ * client (unless an input-method grabs it). */
 void keypress(struct wl_listener *listener, void *data) {
 	int32_t i;
 	/* This event is raised when a key is pressed or released. */

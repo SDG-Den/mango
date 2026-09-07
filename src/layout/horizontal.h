@@ -1,3 +1,14 @@
+/* ============================================================
+ * layout/horizontal.h — the "wide" family of layouts.
+ *   tile / right_tile   : master-stack, masters on the left (or right)
+ *   center_tile         : centered master with left+right stacks
+ *   deck                : masters full-height left, stack tabbed on right
+ *   monocle             : all clients stacked full-screen (only focused seen)
+ *   grid / fair         : rectangular grid packing of visible clients
+ * All of these iterate VISIBLEON clients and call client_tile_resize() with
+ * a computed wlr_box. Gaps and per-client proportions are honored.
+ * ============================================================ */
+
 void tile(Monitor *m) {
 	int32_t i, n = 0, h, r, ie = enablegaps, mw, my, ty;
 	Client *c = NULL;

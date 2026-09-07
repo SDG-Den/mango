@@ -1,3 +1,22 @@
+/* ============================================================
+ * config/parse_config.h — the configuration system (single-header TU).
+ *
+ * Mango's config is a flat `key=value` DSL (NOT ini/sections). The category
+ * is encoded in the key name (e.g. `bind=`, `windowrule=`, `gappih=`,
+ * `blur=`). Parsing pipeline:
+ *   parse_config()         — entry point; resets state, resolves the config
+ *                            path, then runs the pipeline below.
+ *   parse_config_file()    — opens the file, reads line-by-line, skips #/blank.
+ *   parse_config_line()    — strips comments, splits key=value, trims.
+ *   parse_option()         — giant if/else dispatcher mapping keys to fields.
+ *   set_default_key_bindings() — appends VT-switch (CHVT) bindings.
+ *   override_config()      — clamps every scalar to a sane range.
+ *   reload_config()        — re-runs parse_config() for hot-reload.
+ *
+ * Keybindings store a resolved `FuncType` function pointer + prebuilt Arg
+ * (see dispatch/), so there is NO runtime name lookup on keypress.
+ * ============================================================ */
+
 #include <ctype.h>
 #include <libgen.h>
 #include <math.h>
@@ -1553,6 +1572,12 @@ void run_exec_once() {
 	}
 }
 
+/* parse_option() — the giant key dispatcher. For each `key=value` pair it
+ * strcmp's the key and writes the value into the right Config field (scalars
+ * via atoi/atof, strings via snprintf, or — for bind* / rule keys — via the
+ * dedicated binding/rule parsers). Binding keys are detected with a regex
+ * (^bind...$). Unknown keys are reported as errors. This is the bulk of the
+ * config language. */
 bool parse_option(Config *config, char *key, char *value, int line_number) {
 	if (strcmp(key, "keymode") == 0) {
 		snprintf(config->keymode, sizeof(config->keymode), "%.27s", value);
@@ -3552,6 +3577,11 @@ bool parse_config_line(Config *config, const char *line, int line_number) {
 	return parse_option(config, key, value, line_number);
 }
 
+/* parse_config_file() — opens the resolved config file (handling `.`,
+ * `~`, relative, and absolute paths), reads it line-by-line into a fixed
+ * 512-byte buffer, and feeds each non-blank/non-# line to
+ * parse_config_line(). `must_exist` controls whether a missing file is a
+ * fatal error (used for `source` vs `source-optional`). */
 bool parse_config_file(Config *config, const char *file_path, bool must_exist) {
 	FILE *file;
 	char full_path[1024];
@@ -4751,6 +4781,14 @@ void set_default_key_bindings(Config *config) {
 	config->key_bindings_count += default_key_bindings_count;
 }
 
+/* parse_config() — top-level config entry point. Resets all state, then:
+ *   1. resolves the config file path:
+ *        - cli_config_path (from -c) if set,
+ *        - else $HOME/.config/mango/config.conf,
+ *        - else SYSCONFDIR/mango/config.conf.
+ *   2. parse_config_file() -> set_default_key_bindings()
+ *        -> override_config() -> conflict checks.
+ * Returns true on success. reload_config() simply calls this again. */
 bool parse_config(void) {
 
 	char filename[1024];
@@ -5243,6 +5281,11 @@ void reset_tag(int old_tag_num) {
 	}
 }
 
+/* reload_config — hot-reload entry point (bound to a keybinding / IPC).
+ * Re-runs the entire parse_config() pipeline, then re-syncs tag state
+ * (reset_tag) and options (reset_option) so existing windows adapt to the
+ * new config, and pushes an IPC status update. There is no file-watching;
+ * reload is triggered explicitly. */
 void reload_config(const Arg *arg) {
 	int old_tag_num = config.tag_num;
 	parse_config();

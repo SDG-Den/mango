@@ -1,3 +1,17 @@
+/* ============================================================
+ * layout/layout.h — the layout registry.
+ *
+ * Every layout is a `void (*)(Monitor *)` arrange function (declared
+ * here) plus an entry in the `layouts[]` table that binds a symbol (shown
+ * in the status bar), a function, a unique name, and a numeric id. The
+ * active layout for a given tag is m->pertag->ltidxs[tag], which points
+ * at one of these entries.
+ *
+ * `overviewlayout` is special: it is NOT in the registry and is used only
+ * while m->isoverview is set (see layout/overview.h). There must be at
+ * least two entries in `layouts[]`.
+ * ============================================================ */
+
 static void tile(Monitor *m);
 static void center_tile(Monitor *m);
 static void right_tile(Monitor *m);

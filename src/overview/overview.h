@@ -1,3 +1,16 @@
+/* ============================================================
+ * overview/overview.h — the overview card surfaces.
+ *
+ * In overview mode the real client surface is hidden and replaced by a
+ * lightweight "card": overview_backup_surface() disables the real
+ * scene_surface and walks the client's surface tree (including subsurfaces),
+ * building an ov_card_tree of GPU-sampled, scaled snapshots. overview_layout_
+ * card() positions each card (with source-box clipping for the root surface
+ * and relative offsets for subsurfaces). overview_backup/restore() save and
+ * restore floating/fullscreen/maximized state around the mode switch. The
+ * layout math that packs the cards lives in layout/overview.h.
+ * ============================================================ */
+
 // overview 预览：每个客户端建一个独立卡片树，遍历其 surface 树（含
 // subsurface）为每个 surface 建 scene_surface 节点直接绑定纹理，尺寸由
 // GPU 采样缩放，坐标用 client_get_clip 的 geometry 偏移。提交后自动刷新。

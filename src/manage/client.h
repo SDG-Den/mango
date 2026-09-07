@@ -1,3 +1,20 @@
+/* ============================================================
+ * manage/client.h — Client lifecycle, focus, and window states.
+ *
+ * This header (included into mango.c) implements everything about a
+ * managed Client:
+ *   - creation/teardown (createnotify/mapnotify/unmapnotify/destroynotify)
+ *   - focus management (focusclient, focustop, direction_select)
+ *   - window states: floating / fullscreen / fakefullscreen / maximized /
+ *     minimized / global / overlay / scratchpad / swallow
+ *   - per-client rules (applyrules, apply_rule_properties)
+ *   - geometry: resize, client_set_tiled, client_tile_resize, animations
+ *
+ * The Client struct itself lives in mango.c; the per-monitor layout of
+ * clients is driven by arrange() in layout/arrange.h which calls back
+ * into the resize helpers here.
+ * ============================================================ */
+
 static void client_update_geometry(Client *c);
 static void client_init_xwayland(Client *c);
 static bool client_init_unmanaged(Client *c);
@@ -1245,6 +1262,10 @@ void check_match_tag_floating_rule(Client *c, Monitor *mon) {
 	}
 }
 
+/* applyrules — evaluates the configured [windowrule] entries against the
+ * new client (by app-id/title regex) and applies the resulting properties:
+ * tags, floating/fullscreen/monitor, swallow, border/opacity overrides,
+ * scratchpad, etc. Called once at map time, before the window is arranged. */
 void applyrules(Client *c) {
 	/* rule matching */
 	const char *appid, *title;
@@ -1644,6 +1665,10 @@ xwayland_scene_buffer_point_accepts_input(struct wlr_scene_buffer *buffer,
 }
 
 void // fix for 0.5
+/* createnotify — XDG toplevel creation handler. Allocates the Client,
+ * stores a back-pointer in the surface's `data`, and wires every lifecycle
+ * listener (commit/map/unmap/destroy/fullscreen/maximize/minimize/title).
+ * It does NOT map or arrange the window yet — that happens in mapnotify. */
 createnotify(struct wl_listener *listener, void *data) {
 	/* This event is raised when wlr_xdg_shell receives a new xdg surface from a
 	 * client, either a toplevel (application window) or popup,
@@ -2342,6 +2367,12 @@ void client_set_opacity(Client *c, double opacity) {
 								   scene_buffer_apply_opacity, &opacity);
 }
 
+/* focusclient — the central focus routine. Guards against killing/unmapped/
+ * nofocus clients and exclusive-focus layer surfaces, raises the client's
+ * scene node, updates selmon->sel, re-orders fstack, starts opacity
+ * animations, clears urgency, forwards keyboard focus to the seat, and
+ * notifies foreign-toplevel/IME. `lift` controls whether focus history is
+ * updated. Returns early if an exclusive layer owns input. */
 void focusclient(Client *c, int32_t lift) {
 
 	Client *last_focus_client = NULL;
@@ -2651,6 +2682,10 @@ void show_hide_client(Client *c) {
 		wlr_foreign_toplevel_handle_v1_set_activated(c->foreign_toplevel, true);
 }
 
+/* setmon — the ONLY place c->mon changes. Moves a client between monitors
+ * (or detaches it with m == NULL), re-derives its tags, re-applies
+ * floating/fullscreen state, then re-arranges both the old and new monitor
+ * and refocuses. newtags lets a tag-switch also move the client. */
 void setmon(Client *c, Monitor *m, uint32_t newtags, bool focus) {
 	Monitor *oldmon = c->mon;
 
@@ -2736,6 +2771,10 @@ static void view_insert_shift_tags(Monitor *m, uint32_t target) {
 	}
 }
 
+/* setfloating — toggles c->isfloating. On unfloat it restores float_geom,
+ * removes the client from any scroller stack, clears fullscreen/maximize,
+ * tells the client it is tiled again, and re-arranges. Floating windows are
+ * positioned absolutely and exempt from tiling layouts. */
 void // 0.5
 setfloating(Client *c, int32_t floating) {
 

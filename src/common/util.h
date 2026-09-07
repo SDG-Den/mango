@@ -1,4 +1,10 @@
-/* See LICENSE.dwm file for copyright and license details. */
+/* See LICENSE.dwm file for copyright and license details.
+ *
+ * Small project-wide helpers: fatal errors, checked allocation, I/O and
+ * list utilities, and the monotonic-clock helpers that drive animation
+ * timing. These have no dependencies on the rest of the compositor so
+ * they can be included from any translation unit (and from the mmsg
+ * client). */
 #include <time.h>
 #include <wayland-util.h>
 

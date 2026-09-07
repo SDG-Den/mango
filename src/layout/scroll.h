@@ -1,6 +1,18 @@
+/* ============================================================
+ * layout/scroll.h — the scroller (master-stack scroll) layouts.
+ *
+ * Scroller keeps a linked list of "stack heads" (ScrollerStackNode). The
+ * focused head is sized by scroller_proportion and centred; neighbours are
+ * placed to its left/right (or top/bottom for the vertical variant) and
+ * split into their own stacks via arrange_stack_node(). Each client's
+ * geometry is produced from its stack position and the per-node
+ * proportion fields. update_scroller_state() maintains the node list as
+ * clients appear/disappear.
+ * ============================================================ */
+
 /* 获取或创建指定 monitor 某个 tag 的 scroller 状态 */
 static struct TagScrollerState *ensure_scroller_state(Monitor *m,
-													  uint32_t tag) {
+												  uint32_t tag) {
 	if (!m->pertag->scroller_state[tag]) {
 		struct TagScrollerState *st =
 			calloc(1, sizeof(struct TagScrollerState));

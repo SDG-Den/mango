@@ -1,3 +1,14 @@
+/* ============================================================
+ * manage/misc.h — assorted helpers that don't belong to client/monitor/
+ * layer lifecycle. Notable contents:
+ *   - process ancestry (isdescprocess / getparentprocess): used for the
+ *     swallow feature (find the terminal that launched a window).
+ *   - hit-testing: xytoclient / xytonode (what's under the cursor).
+ *   - XDG decoration and session-lock handling.
+ *   - image-capture session helpers.
+ *   - idle-inhibitor management (checkidleinhibitor).
+ * ============================================================ */
+
 pid_t getparentprocess(pid_t p) {
 	uint32_t v = 0;
 

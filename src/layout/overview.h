@@ -1,3 +1,15 @@
+/* ============================================================
+ * layout/overview.h — the overview (Hycov-style) layout.
+ *
+ * When m->isoverview is set, arrange() calls overviewlayout.arrange ->
+ * overview(). It binary-searches a uniform scale (overview_scale) so every
+ * client's snapshot fits via rectangle packing and centers the cluster; the
+ * tab variant (overview_scale_tab) centers the focused client and stacks
+ * the rest in side columns. It also drives jump-mode hints: each visible
+ * client gets a single-character label (create_jump_hints) for quick focus.
+ * The actual card surfaces are built in overview/overview.h.
+ * ============================================================ */
+
 typedef struct {
 	float x, y, w, h;
 } OvPlacedRect;

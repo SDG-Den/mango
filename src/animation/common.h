@@ -1,3 +1,15 @@
+/* ============================================================
+ * animation/common.h — easing curves and the frame-scheduling helper.
+ *
+ * Animation easing is a cubic Bézier defined by 4 control points from
+ * config.animation_curve_*. init_baked_points() pre-samples each curve into
+ * 256 points (baked_points_*); calculate_animation_curve_at()/find_animation_
+ * curve_at() map linear progress t -> eased (x,y). request_fresh_all_monitors()
+ * asks every enabled output to schedule a frame so animations keep advancing.
+ * wlr_scene_tree_snapshot() deep-copies a subtree for "ghost" tag/overview
+ * transitions.
+ * ============================================================ */
+
 struct dvec2 calculate_animation_curve_at(double t, int32_t type) {
 	struct dvec2 point;
 	double *animation_curve;

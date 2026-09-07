@@ -1,3 +1,15 @@
+/* ============================================================
+ * dispatch/bind_define.h — definitions (bodies) of every action function
+ * declared in bind_declare.h. Included into mango.c, so all actions are
+ * compiled into the compositor. A keybinding/mousebinding/IPC dispatch holds
+ * a pointer to one of these functions plus a pre-built Arg.
+ *
+ * Example: setlayout() looks up the layout by name in `layouts[]`, points the
+ * current tag's ltidxs slot at it, clears fullscreen/maximize, re-arranges,
+ * and broadcasts an IPC update. Common patterns here: toggle flags, switch
+ * tags, move/resize, spawn processes, reload config.
+ * ============================================================ */
+
 void bind_to_view(const Arg *arg) {
 	if (!selmon)
 		return;
@@ -733,6 +745,10 @@ void restore_minimized(const Arg *arg) {
 	return;
 }
 
+/* setlayout — switch the layout for the CURRENT tag of selmon. `arg->v` is
+ * the layout name; we match it against layouts[].name, then point
+ * pertag->ltidxs[curtag] at that entry (per-tag, per-monitor selection).
+ * Clears fullscreen/maximize, re-arranges, and notifies IPC watchers. */
 void setlayout(const Arg *arg) {
 	int32_t jk;
 	if (!selmon)

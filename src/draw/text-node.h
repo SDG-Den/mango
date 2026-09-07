@@ -1,3 +1,14 @@
+/* ============================================================
+ * draw/text-node.h — pango/cairo text widgets for the compositor.
+ *
+ * Two widget kinds: MangoJumpLabel (the single-character hints shown in
+ * overview/jump mode) and MangoGroupBar (the tab bar for client groups).
+ * Text is rendered with pango+cairo into an ARGB image surface that is
+ * wrapped as a wlr_buffer and sampled by the GPU as a scene texture. Font
+ * descriptions are cached, and a widget only redraws when its parameters
+ * actually change (see mango_jump_label_node_update).
+ * ============================================================ */
+
 #ifndef jump_label_node_H
 #define jump_label_node_H
 

@@ -1,3 +1,12 @@
+/* ============================================================
+ * data/static_keymap.h — XKB layout name lookup table.
+ *
+ * Maps human-readable XKB layout names ("English (US)", "Russian", ...) to
+ * their short XKB abbreviations ("us", "ru", ...) used when building keyboard
+ * keymaps from a configured full name. 78 entries; terminated by {NULL,NULL}.
+ * Consumed by the keyboard/keymap code (get_layout_abbr).
+ * ============================================================ */
+
 typedef struct {
 	const char *full_name;
 	const char *abbr; // 全部使用小写

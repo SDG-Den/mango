@@ -1,3 +1,15 @@
+/* ============================================================
+ * input/device.h — the input device dispatcher.
+ *
+ * The backend raises new_input for every device; inputdevice() switches on
+ * the device type and calls the appropriate create* (keyboard/pointer/
+ * tablet/tabletpad/touch/switch). It then recomputes the seat's capabilities
+ * (always POINTER+TOUCH, plus KEYBOARD when a keyboard exists). Each device is
+ * wrapped in an InputDevice (tracked in the global inputdevices list) so
+ * config rules, IPC device events, and cleanup are centralized in
+ * destroyinputdevice().
+ * ============================================================ */
+
 void destroyinputdevice(struct wl_listener *listener, void *data) {
 	InputDevice *input_dev =
 		wl_container_of(listener, input_dev, destroy_listener);
@@ -23,6 +35,9 @@ void destroyinputdevice(struct wl_listener *listener, void *data) {
 	free(input_dev);
 }
 
+/* inputdevice — backend new-input handler. Switches on device->type and
+ * dispatches to the right create* function, then recomputes the seat's
+ * capabilities (always POINTER+TOUCH; KEYBOARD when a keyboard exists). */
 void inputdevice(struct wl_listener *listener, void *data) {
 	/* This event is raised by the backend when a new input device becomes
 	 * available.

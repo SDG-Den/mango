@@ -1,3 +1,13 @@
+/* ============================================================
+ * animation/layer.h — layer-surface animations (bars, wallpapers, etc.).
+ *
+ * Mirrors client.h but for LayerSurface objects: open (slide from the
+ * anchored edge), move, and close/fade animations. layer_draw_frame()
+ * animates only TOP/OVERLAY layers (background/bottom are excluded), and
+ * respects config.layer_animations and the per-surface noanim flag. The
+ * fadeout path clones a layer into fadeout_layers for the close animation.
+ * ============================================================ */
+
 void layer_actual_size(LayerSurface *l, int32_t *width, int32_t *height) {
 
 	if (l->animation.running) {

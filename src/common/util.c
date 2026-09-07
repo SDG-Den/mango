@@ -1,4 +1,9 @@
-/* See LICENSE.dwm file for copyright and license details. */
+/* See LICENSE.dwm file for copyright and license details.
+ *
+ * Implementation of the helpers declared in util.h. Note regex_match()
+ * compiles a fresh PCRE2 pattern on every call (no caching) and is used on
+ * hot paths (window-rule / monitor-rule matching), so it is comparatively
+ * expensive — keep that in mind when adding per-event regex matching. */
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -86,6 +91,9 @@ void wl_list_append(struct wl_list *list, struct wl_list *object) {
 	wl_list_insert(list->prev, object);
 }
 
+/* Monotonic-clock helpers. get_now_in_ms() returns milliseconds since an
+ * arbitrary epoch; this is the time source used throughout the animation
+ * subsystem to compute interpolation progress. */
 uint32_t get_now_in_ms(void) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);

@@ -1,3 +1,12 @@
+/* ============================================================
+ * config/preset.h — compile-time presets for the config system.
+ *   - MODKEY: the default modifier for keybindings (Alt).
+ *   - tag_num_MAX: hard upper bound on the number of tags (31), limited by
+ *     the uint32_t tag bitmask. The actual tag count is config.tag_num.
+ *   - tags[]: the human-readable labels for each tag (1..31).
+ *   - xkb_fallback_rules: the keymap used if the config doesn't specify one.
+ * ============================================================ */
+
 #define MODKEY WLR_MODIFIER_ALT
 
 /* 最大可配置的 tag 数量：决定静态数组大小（Pertag 等），同时受 uint32_t

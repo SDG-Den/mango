@@ -1,3 +1,16 @@
+/* ============================================================
+ * input/pointer.h — pointer (cursor) handling: motion, buttons, axis/scroll,
+ * gestures, drag-to-move/resize, pointer constraints, and hotareas.
+ *
+ *   createpointer()     — attach a libinput pointer to the shared cursor.
+ *   motionnotify()      — the convergence point for pointer/tablet/touch
+ *                        motion: updates cursor, applies constraints, does
+ *                        sloppy focus, and drives interactive move/resize.
+ *   buttonpress()       — match mouse bindings (mod+button) and start/end
+ *                        interactive move/resize (cursor_mode CurMove/CurResize).
+ *   axisnotify()/ongesture() — scroll-wheel and touchpad swipe bindings.
+ * ============================================================ */
+
 void toggle_hotarea(int32_t x_root, int32_t y_root) {
 	// 左下角热区坐标计算,兼容多显示屏
 	Arg arg = {0};
@@ -681,6 +694,10 @@ void configure_pointer(struct wlr_input_device *wlr_device,
 		libinput_device_config_send_events_set_mode(device, send_events_mode);
 }
 
+/* createpointer — attach a libinput pointer to the shared wlr_cursor and
+ * apply libinput settings (tap-to-click, accel, scroll, DWT, handedness),
+ * preferring per-device devicerules then the global trackpad_ / mouse_ *.
+ * Also wraps it in an InputDevice for config rules and cleanup. */
 void createpointer(struct wlr_pointer *pointer) {
 
 	struct libinput_device *device = NULL;
@@ -989,6 +1006,10 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 	}
 }
 
+/* motionrelative — pointer motion handler. Updates the wlr_cursor, then
+ * calls motionnotify() which does the real work: constraint confinement,
+ * sloppy focus, and interactive move/resize. This is the pointer-side entry
+ * to the same motion pipeline tablet/touch also feed. */
 void motionrelative(struct wl_listener *listener, void *data) {
 	/* This event is forwarded by the cursor when a pointer emits a
 	 * _relative_ pointer motion event (i.e. a delta) */

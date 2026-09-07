@@ -1,3 +1,13 @@
+/* ============================================================
+ * layout/dwindle.h — the dwindle (binary space partition) layout.
+ *
+ * Maintains one DwindleNode tree per monitor+tag (pertag->dwindle_root).
+ * Visible clients are inserted as leaves; the tree is recursively split
+ * into first/second children by a ratio and an orientation chosen from the
+ * container's aspect ratio. dwindle_assign() walks the pruned tree to place
+ * each window. Nodes can be drag-locked to keep a split orientation.
+ * ============================================================ */
+
 static DwindleNode *dwindle_locked_h_node = NULL;
 static DwindleNode *dwindle_locked_v_node = NULL;
 

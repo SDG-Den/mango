@@ -1,3 +1,14 @@
+/* ============================================================
+ * dispatch/bind_declare.h — forward declarations for every action function.
+ *
+ * Each compositor action (spawn, killclient, focusdir, setlayout, reload_config,
+ * ...) is a `void f(const Arg *)` function. This file declares them all so any
+ * subsystem (config parser, IPC, keyboard handler) can reference them. The
+ * bodies live in bind_define.h, which is textually included into mango.c.
+ * The config parser / IPC resolve a function NAME to one of these pointers via
+ * the parse_func_name() table, so a keybinding stores the pointer directly.
+ * ============================================================ */
+
 void minimized(const Arg *arg);
 void restore_minimized(const Arg *arg);
 void toggle_scratchpad(const Arg *arg);

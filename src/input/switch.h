@@ -1,3 +1,12 @@
+/* ============================================================
+ * input/switch.h — switch devices (lid/tablet switches).
+ *
+ * switch_toggle() is the toggle-event handler for a wlr_switch. It matches
+ * the switch state (folded/unfolded, lid open/closed, ...) against the
+ * configured switch_bindings and invokes the bound action — e.g. suspending
+ * or locking the screen when the lid closes.
+ * ============================================================ */
+
 void switch_toggle(struct wl_listener *listener, void *data) {
 	// 获取包含监听器的结构体
 	Switch *sw = wl_container_of(listener, sw, toggle);

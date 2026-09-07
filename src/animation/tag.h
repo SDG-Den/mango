@@ -1,3 +1,13 @@
+/* ============================================================
+ * animation/tag.h — tag-switch (workspace) transition animations.
+ *
+ * When the visible tagset changes, clients entering/leaving the view get an
+ * off-screen start/end geometry (in the configured tag_animation_direction)
+ * and are slid in/out by the client animation tick. set_tagin_animation /
+ * set_tagout_animation set up those geometries; set_arrange_visible /
+ * set_arrange_hidden trigger them during arrange().
+ * ============================================================ */
+
 void set_tagin_animation(Monitor *m, Client *c) {
 	if (c->animation.running) {
 		c->animainit_geom.x = c->animation.current.x;

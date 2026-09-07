@@ -1,3 +1,13 @@
+/* ============================================================
+ * input/tablet.h — drawing-tablet support via wlr_tablet_v2.
+ *
+ * Handles stylus tools (proximity/axis/motion/button/tip) and tablet pads
+ * (buttons/rings/strips). Stylus motion is forwarded as absolute cursor
+ * position (or relative for mouse/lens tools); a tip-down reuses the pointer
+ * button path so tablets can drive the same click/drag/resize logic. A pad is
+ * auto-paired to a tool's tablet via the libinput device group.
+ * ============================================================ */
+
 #include <wlr/types/wlr_tablet_pad.h>
 #include <wlr/types/wlr_tablet_tool.h>
 #include <wlr/types/wlr_tablet_v2.h>

@@ -1,3 +1,18 @@
+/* ============================================================
+ * animation/client.h — per-client window animations.
+ *
+ * Mango's animations are NOT timer-driven; they are driven by the per-output
+ * frame event. rendermon() (manage/monitor.h) calls client_draw_frame() for
+ * each client, which advances c->animation one tick (client_animation_next_
+ * tick) ONLY while it is running, then requests another frame if any
+ * animation is still active. So the loop self-schedules frame-by-frame.
+ *
+ * Easing is a baked cubic-Bézier curve (see common.h); each tick interpolates
+ * the client's scene-node geometry from animation.initial -> current by the
+ * eased progress. Open/move/close/tag transitions and focus opacity are all
+ * implemented here.
+ * ============================================================ */
+
 #include "wlr/util/log.h"
 
 static inline bool client_is_ignore_output_clip(Client *c) {
@@ -1125,6 +1140,11 @@ void fadeout_client_animation_next_tick(Client *c) {
 	}
 }
 
+/* client_animation_next_tick — advance ONE frame of a client's animation.
+ * Computes linear progress (elapsed / duration) from the monotonic clock,
+ * maps it through the eased curve, and interpolates the scene node geometry
+ * from animation.initial -> current. Returns (via the caller) whether the
+ * animation finished; the renderer reschedules a frame while any are running. */
 void client_animation_next_tick(Client *c) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1651,6 +1671,11 @@ bool client_apply_focus_opacity(Client *c) {
 	return false;
 }
 
+/* client_draw_frame — called once per frame per client from rendermon().
+ * If animations are enabled and the client's animation is running, advances
+ * it one tick (client_animation_next_tick) and keeps need_next_tick true so
+ * the output schedules another frame. Also applies focus-opacity. Returns
+ * whether more frames are needed (the self-scheduling loop). */
 bool client_draw_frame(Client *c) {
 
 	bool need_next_tick = false;

@@ -1,3 +1,13 @@
+/* ============================================================
+ * input/touch.h — touch-screen input.
+ *
+ * Each touch point is handled in one of two modes: if the target surface
+ * accepts the touch protocol it is forwarded via wlr_seat_touch_notify_*,
+ * otherwise the first finger EMULATES a pointer (reusing handle_buttonpress)
+ * so touch-only apps still work. Coordinates honor XWayland scaling. Multiple
+ * fingers can map to independent emulated pointers.
+ * ============================================================ */
+
 #include <wlr/types/wlr_touch.h>
 
 static void createtouch(struct wlr_touch *touch);

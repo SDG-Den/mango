@@ -107,10 +107,36 @@
 #include "common/util.h"
 #include "draw/text-node.h"
 
+/* ============================================================
+ * mango.c — the compositor's main translation unit.
+ *
+ * Mango is a dwl-derived Wayland compositor. Unlike a typical
+ * modular C project, almost everything is compiled into THIS file:
+ * the other src/ headers (the *.h files in manage/, layout/, input/, animation/,
+ * ipc/, config/, dispatch/, ...) are not separate translation units —
+ * they are textually #included near the bottom of this file and so
+ * become part of mango.c at compile time. That is why you will see
+ * function *definitions* living inside .h files.
+ *
+ * Responsibilities of this file:
+ *   - program entry point (main/setup/run/cleanup)
+ *   - creation of the wl_display, backend, renderer (scenefx),
+ *     scene graph, compositor, seat and cursor
+ *   - registration of every global Wayland/wlroots listener
+ *   - the central Client/Monitor data structures
+ *   - the top-level arrange() dispatcher and config loading
+ *
+ * State is kept in file-scope `static` globals (there is no
+ * `struct server`); see the globals block further down.
+ * ============================================================ */
+
 /* macros */
+/* Basic min/max/clamp helpers used pervasively across the TU. */
 #define MANGO_MAX(A, B) ((A) > (B) ? (A) : (B))
 #define MANGO_MIN(A, B) ((A) < (B) ? (A) : (B))
 #define GEZERO(A) ((A) >= 0 ? (A) : 0)
+/* Strip CapsLock out of a modifier mask. Binding comparisons use this so
+ * that CapsLock being on does not prevent a keybinding from matching. */
 #define CLEANMASK(mask) (mask & ~WLR_MODIFIER_CAPS)
 #define INSIDEMON(A)                                                           \
 	(A->geom.x >= A->mon->m.x && A->geom.y >= A->mon->m.y &&                   \
@@ -131,6 +157,12 @@
 #define ISFAKETILED(A)                                                         \
 	(A && !(A)->isfloating && !(A)->isminimized && !(A)->iskilling &&          \
 	 !(A)->isunglobal)
+/* The single most important predicate in the compositor. A client is
+ * VISIBLEON a monitor when it belongs to that monitor, is not logically
+ * hidden (overview/animation bookkeeping), and either its tags intersect
+ * the monitor's currently-selected tagset OR it is global/unglobal
+ * (sticky — shown on every tag). Layout code uses this to decide which
+ * clients to arrange. */
 #define VISIBLEON(C, M)                                                        \
 	((C) && (M) && (C)->mon == (M) && !(C)->is_logic_hide &&                   \
 	 (((C)->tags & (M)->tagset[(M)->seltags] || (C)->isglobal ||               \
@@ -145,11 +177,23 @@
 
 #define LENGTH(X) (sizeof X / sizeof X[0])
 #define END(A) ((A) + LENGTH(A))
+/* Convenience wrapper: assign handler H to listener L and subscribe it to
+ * signal E in one step. Used everywhere to wire wl_signal events to
+ * their .notify callbacks. */
 #define LISTEN(E, L, H) wl_signal_add((E), ((L)->notify = (H), (L)))
 
-#define TAGMASK (tagmask)
-uint32_t tagmask = ((1u << 9) - 1); // 默认 9 个 tag
+/* LISTEN_STATIC: same as LISTEN but heap-allocates the listener (so it has
+ * a stable lifetime, e.g. for one-shot global signals). */
 
+/* TAGMASK is the bitmask of all valid tags (1..tag_num). It is a variable
+ * (not a compile constant) so the number of tags can be changed at config
+ * time. Default is 9 tags (bits 0..8). */
+#define TAGMASK (tagmask)
+uint32_t tagmask = ((1u << 9) - 1); // default: 9 tags (bits 0-8)
+
+/* "Fullscreen" for hit-testing/focus purposes also counts maximized and
+ * the overview backups of those states, so callers can treat any of them
+ * uniformly. */
 #define ISFULLSCREEN(A)                                                        \
 	((A)->isfullscreen || (A)->ismaximizescreen ||                             \
 	 (A)->overview_ismaximizescreenbak || (A)->overview_isfullscreenbak)
@@ -350,13 +394,32 @@ struct ov_card_surface {
 	struct wl_listener destroy; /* surface 销毁时移除节点 */
 };
 
+/* ============================================================
+ * struct Client — one managed toplevel window (the "c" struct).
+ *
+ * This is the central window object. Every XDG toplevel, XWayland
+ * window, and layer-shell surface gets backed by a Client (or a
+ * LayerSurface for layer-shell). The first THREE fields (type, the
+ * wlr_box geometry group, mon) MUST stay in that order because code
+ * casts/inspects clients generically via the scene node's `data`
+ * pointer and relies on `type` being at offset 0.
+ *
+ * Flags are plain int32_t booleans (1/0) rather than bitfields so
+ * they can be toggled and tested cheaply; see the big flag block.
+ * ============================================================ */
 struct Client {
 	/* Must keep these three elements in this order */
-	uint32_t type; // must at first in struct
+	uint32_t type; // must at first in struct — discriminator (XDGShell/LayerShell/X11/...)
+	/* Geometry boxes (layout-relative, border included):
+	 *   geom            — current laid-out geometry
+	 *   pending         — geometry the client has been asked for (configure)
+	 *   float_geom      — remembered floating geometry when not tiled
+	 *   current/animainit_geom — animation start/end boxes
+	 *   overview_backup_geom / drag_begin_geom — overview / drag snapshots */
 	struct wlr_box geom, pending, float_geom, animainit_geom,
 		overview_backup_geom, current,
 		drag_begin_geom; /* layout-relative, includes border */
-	Monitor *mon;
+	Monitor *mon; /* the monitor this client currently lives on (set only via setmon) */
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border; /* top, bottom, left, right */
 	struct wlr_scene_rect *droparea;
@@ -406,10 +469,22 @@ struct Client {
 	bool xwl_req_valid;
 #endif
 	uint32_t bw;
+	/* tags: bitmask of which tags (workspaces) this client is on.
+	 * tags == 0 means hidden/minimized. oldtags remembers the previous
+	 * set; mini_restore_tag saves the tag to return to on un-minimize. */
 	uint32_t tags, oldtags, mini_restore_tag;
 	bool dirty;
 	uint32_t configure_serial;
 	struct wlr_foreign_toplevel_handle_v1 *foreign_toplevel;
+	/* --- Window state flags (1 = true). The major ones:
+	 *   isfloating       — tiled vs floating
+	 *   isfullscreen     — true (output-covering) fullscreen
+	 *   isfakefullscreen — app told it's fullscreen but stays tiled
+	 *   isminimized      — hidden (tags == 0, parked in scratchpad)
+	 *   isoverlay        — reparented to the always-on-top overlay layer
+	 *   isurgent         — urgency hint (cleared on focus)
+	 *   isglobal/isunglobal — sticky on all tags (unglobal also skips focus)
+	 *   idleinhibit_when_focus / vrr_only_fullscreen / force_render — hints */
 	int32_t isfloating, isurgent, isfullscreen, isfakefullscreen,
 		need_float_size_reduce, isminimized, isoverlay, isnosizehint,
 		ignore_maximize, ignore_minimize, idleinhibit_when_focus,
@@ -461,6 +536,10 @@ struct Client {
 	bool need_output_flush;
 	struct mango_animation animation;
 	struct mango_opacity_animation opacity_animation;
+	/* Swallow support: when a terminal launches an app whose pid is a
+	 * descendant, the terminal is hidden and `swallowing` points at the
+	 * new client; `swallowdby` is the reverse link. isterm marks a
+	 * swallowable terminal; noswallow disables swallowing for `c`. */
 	int32_t isterm, noswallow;
 	int32_t allow_csd;
 	int32_t force_fakemaximize;
@@ -482,6 +561,10 @@ struct Client {
 	int32_t noblur;
 	float blur_opacity;
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
+	/* Per-client layout proportions used by master/stack and grid layouts.
+	 * master_mfact_per = this client's share of the master area width/height;
+	 * master_inner_per/stack_inner_per split the master/stack columns.
+	 * These are normalized by arrange() so resizing stays stable. */
 	double master_mfact_per, master_inner_per, stack_inner_per;
 	double old_master_mfact_per, old_master_inner_per, old_stack_inner_per;
 	double old_scroller_pproportion;
@@ -578,6 +661,10 @@ typedef struct {
 	struct wl_listener reposition;
 } Popup;
 
+/* A Layout is just a symbol + an arrange() function pointer + a name + id.
+ * Selecting a layout for a tag means pointing that tag's layout slot at a
+ * Layout in the global `layouts[]` registry (see layout/layout.h). The
+ * arrange() function is what actually computes client geometries. */
 typedef struct {
 	const char *symbol;
 	void (*arrange)(Monitor *);
@@ -585,22 +672,25 @@ typedef struct {
 	uint32_t id;
 } Layout;
 
+/* struct Monitor — one physical output and its per-tag window state.
+ * Monitors are kept in the global `mons` list. */
 struct Monitor {
 	struct wl_list link;
 	struct wlr_output *wlr_output;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
-	struct wl_listener frame;
+	struct wl_listener frame; /* per-frame render callback (drives animations) */
 	struct wl_listener destroy;
 	struct wl_listener request_state;
 	struct wl_listener destroy_lock_surface;
 	struct wlr_session_lock_surface_v1 *lock_surface;
 	struct wl_event_source *skip_frame_timeout;
 	struct wlr_box m;		  /* monitor area, layout-relative */
-	struct wlr_box w;		  /* window area, layout-relative */
-	struct wl_list layers[4]; /* LayerSurface::link */
-	uint32_t seltags;
-	uint32_t tagset[2];
+	struct wlr_box w;		  /* window area AFTER layer-shell exclusive zones
+							   * are subtracted; arrange() lays clients out inside w */
+	struct wl_list layers[4]; /* LayerSurface::link (bg/bottom/top/overlay) */
+	uint32_t seltags; /* index (0/1) into tagset[] — double-buffered view */
+	uint32_t tagset[2]; /* selected tag bitmask for each buffer */
 	bool skiping_frame;
 	uint32_t resizing_count_pending;
 	uint32_t resizing_count_current;
@@ -609,15 +699,17 @@ struct Monitor {
 	int32_t gappiv; /* vertical gap between windows */
 	int32_t gappoh; /* horizontal outer gaps */
 	int32_t gappov; /* vertical outer gaps */
-	Pertag *pertag;
+	Pertag *pertag; /* per-tag layout/gaps/scroller state (one slot per tag) */
 	uint32_t ovbk_current_tagset;
 	uint32_t ovbk_prev_tagset;
-	Client *sel, *prevsel;
-	int32_t isoverview;
+	Client *sel, *prevsel; /* currently focused / previously focused client */
+	int32_t isoverview; /* non-zero when the overview mode is active */
 	int32_t is_jump_mode;
 	int32_t is_in_hotarea;
 	int32_t ov_normal_mode; /* 热区进入时忽略 ov_tab_mode */
 	int32_t only_sleep;
+	/* Visibility counters recomputed each arrange() — used by layout
+	 * algorithms to know how many clients they are placing. */
 	uint32_t visible_clients;
 	uint32_t visible_tiling_clients;
 	uint32_t visible_scroll_tiling_clients;
@@ -663,6 +755,10 @@ struct capture_session_tracker {
 };
 
 typedef struct DwindleNode DwindleNode;
+/* Dwindle layout maintains a binary space-partition tree per tag. Each
+ * node is either a split (with first/second children and a split ratio)
+ * or a leaf holding a single Client. arrange() walks this tree to place
+ * windows. */
 struct DwindleNode {
 	bool is_split;
 	bool split_h;
@@ -680,6 +776,10 @@ struct DwindleNode {
 	Client *client;
 };
 
+/* Scroller layout: each node is a "stack head" (the focused window of a
+ * stack) linked to neighbours in the scroll, with a separate all_next
+ * list for quick iteration. Proportions control how much screen the
+ * focused head and its stack occupy. */
 struct ScrollerStackNode {
 	Client *client;
 	float scroller_proportion;
@@ -1101,6 +1201,18 @@ static const char broken[] = "broken";
 static pid_t child_pid = -1;
 static int32_t locked;
 static uint32_t locked_mods = 0;
+/* ============================================================
+ * GLOBAL STATE
+ *
+ * Mango deliberately keeps all compositor state in file-scope
+ * `static` globals rather than a `struct server`. The main ones:
+ *   dpy/event_loop/backend    — the wlroots server backbone
+ *   scene/layers[]/drw/alloc  — the scene graph and rendering
+ *   compositor/xdg_shell/...  — the protocol globals we advertise
+ *   clients/fstack/mons       — the live window/monitor lists
+ *   seat/cursor/kb_group      — input
+ * (The animation curve tables `baked_points_*` are filled at startup.)
+ * ============================================================ */
 static void *exclusive_focus;
 static struct wl_display *dpy;
 static struct wl_event_loop *event_loop;
@@ -1114,10 +1226,10 @@ static struct wlr_compositor *compositor;
 
 static struct wlr_xdg_shell *xdg_shell;
 static struct wlr_xdg_decoration_manager_v1 *xdg_decoration_mgr;
-static struct wl_list clients; /* tiling order */
-static struct wl_list fstack;  /* focus order */
-static struct wl_list fadeout_clients;
-static struct wl_list fadeout_layers;
+static struct wl_list clients; /* tiling order — every managed client, in tiling order */
+static struct wl_list fstack;  /* focus-stacking order — most-recently-focused first */
+static struct wl_list fadeout_clients; /* clients currently playing a close/fade animation */
+static struct wl_list fadeout_layers; /* layer surfaces currently fading out */
 static struct wlr_idle_notifier_v1 *idle_notifier;
 static struct wlr_idle_inhibit_manager_v1 *idle_inhibit_mgr;
 static struct wlr_layer_shell_v1 *layer_shell;
@@ -1170,8 +1282,8 @@ static int32_t last_apply_drap_time = 0;
 
 static struct wlr_output_layout *output_layout;
 static struct wlr_box sgeom;
-static struct wl_list mons;
-static Monitor *selmon;
+static struct wl_list mons; /* all known monitors */
+static Monitor *selmon; /* the monitor the cursor (or focus) is currently on */
 static struct wlr_scene_output_layout *scene_layout;
 
 static int32_t enablegaps = 1; /* enables gaps, used by togglegaps */
@@ -1474,6 +1586,11 @@ cleanup:
 	free(env_keys);
 }
 
+/* run() — starts the server: opens the Wayland socket, starts the backend
+ * (enumerates outputs/inputs, becomes DRM master), forks the startup
+ * command, picks the initial selmon/cursor, runs autostart execs, then
+ * enters the event loop via wl_display_run() (which does not return until
+ * the compositor exits). */
 void // 17
 run(char *startup_cmd, int readiness_fd) {
 	/* Add a Unix socket to the Wayland display. */
@@ -1554,6 +1671,11 @@ run(char *startup_cmd, int readiness_fd) {
 
 // 修改信号处理函数，接收掩码参数
 
+/* setup() — one-time initialization, called once from main() before the
+ * event loop starts. It parses config, installs signal handlers, then
+ * creates the display, backend, scene graph, scenefx renderer, color
+ * management, allocator, compositor, seat, cursor, and registers ALL the
+ * global wlroots listeners that drive the rest of the compositor. */
 void setup(void) {
 	setenv("XDG_CURRENT_DESKTOP", "mango", 1);
 	setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 1);
@@ -1959,6 +2081,14 @@ void setup(void) {
 #endif
 }
 
+/* main() — process entry point. Parses CLI flags, then calls the three
+ * lifecycle phases in order: setup() → run() → cleanup().
+ *   -s <cmd> : startup command to fork after the backend starts
+ *   -c <file>: explicit config file path (overrides the default search)
+ *   -r <fd>  : readiness fd (write '\n' once running, for supervisors)
+ *   -p       : only validate the config, then exit
+ *   -d       : enable debug logging
+ *   -v       : print version and exit */
 int32_t main(int32_t argc, char *argv[]) {
 	char *startup_cmd = NULL;
 	int32_t c;

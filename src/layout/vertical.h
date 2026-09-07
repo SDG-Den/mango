@@ -1,3 +1,11 @@
+/* ============================================================
+ * layout/vertical.h — the "tall" family of layouts. These are rotations of
+ * horizontal.h: masters are stacked along the top edge and the stack fills
+ * the area below (vertical_tile / vertical_deck / vertical_grid /
+ * vertical_scroller / vertical_fair). Geometry is computed with widths and
+ * heights swapped relative to the horizontal variants.
+ * ============================================================ */
+
 void vertical_tile(Monitor *m) {
 	int32_t i, n = 0, w, r, ie = enablegaps, mh, mx, tx;
 	Client *c = NULL;

@@ -1,3 +1,18 @@
+/* ============================================================
+ * manage/monitor.h — Monitor lifecycle, output management, and the
+ * per-frame render entry point.
+ *
+ * Responsibilities:
+ *   - createmon/closemon/updatemons: output add/remove/reconfigure
+ *   - layout queries: is_scroller_layout / is_monocle_layout / etc.
+ *   - rendermon(): the per-output frame callback that drives animations
+ *     and commits the wlroots output state (tearing / ICC / HDR aware)
+ *   - monitor geometry helpers: dirtomon, xytomon, setgaps, monitor_set_icc
+ *
+ * Monitors are added by the backend via the new_output listener wired in
+ * mango.c; each one gets a Monitor struct and a scene output.
+ * ============================================================ */
+
 Monitor *dirtomon(enum wlr_direction dir) {
 	struct wlr_output *next;
 	if (!wlr_output_layout_get(output_layout, selmon->wlr_output))

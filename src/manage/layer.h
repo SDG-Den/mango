@@ -1,3 +1,17 @@
+/* ============================================================
+ * manage/layer.h — Layer-shell surface management.
+ *
+ * Implements the LayerSurface type (the backing object for
+ * wl_surface_controller / wlr_layer_shell_v1 clients such as bars,
+ * wallpapers, lockscreens). Key jobs:
+ *   - arrangelayer/arrangelayers: reserve each layer's exclusive zones from
+ *     the monitor's full area (m) into the usable window area (w), so
+ *     tiled clients never overlap panels.
+ *   - createlayersurface + map/commit/unmap handlers: build the scene node,
+ *     apply layer rules, and re-run arrangelayers on changes.
+ *   - focuslayer / exclusive-focus handling.
+ * ============================================================ */
+
 void arrangelayer(Monitor *m, struct wl_list *list, struct wlr_box *usable_area,
 				  int32_t exclusive) {
 	LayerSurface *l = NULL;

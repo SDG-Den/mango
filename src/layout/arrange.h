@@ -1,3 +1,21 @@
+/* ============================================================
+ * layout/arrange.h — the arrangement orchestrator and resize plumbing.
+ *
+ * arrange() is the top-level function called whenever the visible set of
+ * clients changes (map/unmap/focus/tag switch/fullscreen/...). It:
+ *   1. ensures sel is valid,
+ *   2. runs pre_calculate_before_arrange() to count visible clients and
+ *      assign each a role (master vs stack, left/right, per-client
+ *      proportion fields),
+ *   3. dispatches to the active layout's arrange() (or overviewlayout
+ *      when overview is active),
+ *   4. fans out an IPC printstatus(IPC_WATCH_ARRANGGE) update.
+ *
+ * The per-client proportion fields are normalized by reset_size_per_mon()
+ * so that interactive resizing stays stable. resize_tile_client() routes
+ * drag/keyboard resizing to the correct layout-specific handler.
+ * ============================================================ */
+
 void set_size_per(Monitor *m, Client *c) {
 	Client *fc = NULL;
 	bool found = false;
@@ -1346,6 +1364,11 @@ void tag_gather_apply(Monitor *m) {
 }
 
 void // 17
+/* arrange() — the top-level layout dispatcher. Recomputes visibility/
+ * roles, then either calls overviewlayout.arrange (if overview is active)
+ * or the per-tag layout's arrange(m). `want_animation` lets callers request
+ * animated transitions; `from_view` marks a workspace/tag switch. This is
+ * the function nearly every state change ends up calling. */
 arrange(Monitor *m, bool want_animation, bool from_view) {
 
 	if (!m || m->iscleanuping)

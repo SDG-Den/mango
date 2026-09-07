@@ -1,3 +1,23 @@
+/* ============================================================
+ * ipc/ipc.h — the mango IPC protocol.
+ *
+ * Transport: a custom line-delimited protocol over a UNIX stream socket
+ * ($XDG_RUNTIME_DIR/mango-<pid>.sock; path exported as
+ * MANGO_INSTANCE_SIGNATURE so the mmsg client can find it). Each command is
+ * a single '\n'-terminated line; each reply is a single line of JSON.
+ *
+ * Commands:
+ *   get ...        — one-shot query, JSON reply (version, monitors, clients,
+ *                    tags, layouts, keymode, ...)
+ *   dispatch <f>   — invoke an action function by name + args
+ *   watch ...      — register a persistent watcher; the compositor pushes
+ *                    updates via printstatus() -> handle_print_status() ->
+ *                    ipc_notify_* fan-out.
+ *
+ * Clients are tracked in `watch_clients`; printstatus(IPC_WATCH_*) is the
+ * single funnel every state change calls to notify subscribers.
+ * ============================================================ */
+
 #include <cjson/cJSON.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1189,10 +1209,18 @@ void ipc_notify_kb_layout(void) {
 		free(json_str);
 }
 
+/* printstatus() — the single funnel for state-change notifications. Every
+ * subsystem that wants to inform IPC watchers calls printstatus(type), which
+ * emits the mango_print_status signal; handle_print_status() decodes the
+ * bitmask and calls the matching ipc_notify_* functions to push JSON to each
+ * subscribed watch client. */
 void printstatus(enum ipc_watch_type type) {
 	wl_signal_emit(&mango_print_status, &type);
 }
 
+/* handle_print_status — fans a single printstatus() call out to every
+ * matching watcher (monitors, clients, tags, keymode, keyboard layout, ...)
+ * by composing and sending JSON snapshots. */
 void handle_print_status(struct wl_listener *listener, void *data) {
 
 	enum ipc_watch_type type = *(enum ipc_watch_type *)data;
@@ -1253,6 +1281,11 @@ static int ipc_sock_fd = -1;
 static struct wl_event_source *ipc_event_source = NULL;
 static char ipc_socket_path[256];
 
+/* ipc_init() — called from setup(). Creates the UNIX socket at
+ * $XDG_RUNTIME_DIR/mango-<pid>.sock, exports its path in the
+ * MANGO_INSTANCE_SIGNATURE env var (so mmsg and other clients can find it),
+ * and registers the listening fd with the wlroots event loop. Incoming
+ * connections are accepted in ipc_handle_connection(). */
 void ipc_init(struct wl_event_loop *event_loop) {
 	wl_list_init(&watch_clients);
 

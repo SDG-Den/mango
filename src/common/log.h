@@ -1,6 +1,11 @@
 #ifndef MANGO_LOG_H
 #define MANGO_LOG_H
 
+/* Thin logging wrapper around wlroots' logging. mango_error(...) is the
+ * main entry point: it auto-injects __FILE__/__LINE__ so messages are
+ * traceable. Passing log=true routes through wlroots (adds a [file:line]
+ * prefix); log=false prints straight to stderr for direct user output. */
+
 #include <stdbool.h>
 #include <wlr/util/log.h>
 
