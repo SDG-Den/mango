@@ -367,12 +367,15 @@ void setup(void) {
 	setenv("XDG_CURRENT_DESKTOP", "mango", 1);
 	setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 1);
 
+	wl_list_init(&server.monitors);
+
 	parse_config();
 	if (server.cli_debug_log) {
 		config.log_level = WLR_DEBUG;
 	}
 	init_baked_points();
 	init_texture_system();
+	texture_prewarm_all();
 
 	set_env_without_display();
 
@@ -577,7 +580,6 @@ void setup(void) {
 
 	/* Configure a listener to be notified when new outputs are available on
 	 * the backend. */
-	wl_list_init(&server.monitors);
 	wl_signal_add(&server.backend->events.new_output,
 				  &server.new_output_listener);
 	server.scene_layout =

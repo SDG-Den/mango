@@ -686,6 +686,8 @@ void set_env_without_display();
 
 void set_env_display();
 
+void texture_prewarm_all();
+
 FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 						 char *arg_value2, char *arg_value3, char *arg_value4,
 						 char *arg_value5);

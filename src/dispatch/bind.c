@@ -2552,19 +2552,23 @@ void setactivetexture(const Arg *arg) {
 	int slot;
 	const char *opts;
 	parse_texture_slot_args(arg, &slot, &opts);
-	if (c)
+if (c) {
 		client_texture_from_string(c, true, slot, arg->v, opts);
+		client_texture_invalidate(c);
+	}
 	texture_collect_garbage(false);
 }
 void setinactivetexture(const Arg *arg) {
-	Client *c = arg->tc						  ? arg->tc
+	Client *c = arg->tc					  ? arg->tc
 				: server.selected_monitor ? server.selected_monitor->sel
 										  : NULL;
 	int slot;
 	const char *opts;
 	parse_texture_slot_args(arg, &slot, &opts);
-	if (c)
+	if (c) {
 		client_texture_from_string(c, false, slot, arg->v, opts);
+		client_texture_invalidate(c);
+	}
 	texture_collect_garbage(false);
 }
 

@@ -15,13 +15,8 @@ typedef struct {
 	float degree;
 } GradientStop;
 
-typedef struct {
-	GradientStop *stops;
-	int stopcount;
-} GradientBorder;
 
 typedef enum {
-	TEXTURE_GRADIENT,
 	TEXTURE_LINEAR_GRADIENT,
 	TEXTURE_RADIAL_GRADIENT,
 	TEXTURE_CONIC_GRADIENT,
@@ -35,6 +30,15 @@ typedef enum {
 	TEXTURE_STATIC_IMAGE,
 	TEXTURE_COLOR_SEGMENT,
 	TEXTURE_STORE_IMAGE,
+	TEXTURE_STORE_IMAGE_SCALED,
+	TEXTURE_SEGMENT_TILE_TOP,
+	TEXTURE_SEGMENT_TILE_BOTTOM,
+	TEXTURE_SEGMENT_TILE_LEFT,
+	TEXTURE_SEGMENT_TILE_RIGHT,
+	TEXTURE_SEGMENT_TILE_TL,
+	TEXTURE_SEGMENT_TILE_TR,
+	TEXTURE_SEGMENT_TILE_BL,
+	TEXTURE_SEGMENT_TILE_BR,
 	TEXTURE_STYLE_COUNT,
 } TextureStyle;
 
@@ -42,9 +46,11 @@ typedef enum {
 // this will cause breakage if another field is ever added to this struct.
 typedef struct {
 	TextureStyle style;
-	GradientBorder gradient;
+	int stopcount;
+	GradientStop *stops;
 	char *string;
 } BorderTextureKey;
+_Static_assert(sizeof(BorderTextureKey) == 24, "must pack to 24 bytes");
 
 struct TextureOps {
 	bool (*key_empty)(const BorderTextureKey *key);
@@ -75,6 +81,7 @@ struct wlr_buffer *texture_make_ring(struct wlr_buffer *canvas, int width,
 									 bool stamp_inside);
 void texture_collect_garbage(bool clean_image_store);
 void texture_cache_teardown(void);
+void texture_prewarm(const BorderTextureKey *key);
 
 struct wlr_buffer *texture_composite_slots(const BorderTextureKey slots[MANGO_TEXTURE_SLOTS], struct Client *target, int width, int height);
 

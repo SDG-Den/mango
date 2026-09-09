@@ -16,11 +16,17 @@
 #define M_PI 3.141592653589793238462643383279502884
 #endif
 
+
 struct TextureCacheEntry {
 	BorderTextureKey key;
 	struct wlr_buffer *canvas;
-	uint32_t use_count;
-};
+	uint64_t generation;
+	uint32_t hash;
+} __attribute__((aligned(64)));
+
+_Static_assert(sizeof(struct TextureCacheEntry) == 64,
+			   "TextureCacheEntry must be 64 bytes");
+
 
 typedef struct {
 	const char *name;
@@ -31,14 +37,14 @@ typedef struct {
 static const TextureStyleName texture_style_names[] = {
 	{"linear_gradient", TEXTURE_LINEAR_GRADIENT},
 	{"radial_gradient", TEXTURE_RADIAL_GRADIENT},
-	{"tiled_image", TEXTURE_TILED_IMAGE},
+	{"tile_image", TEXTURE_TILED_IMAGE},
 	{"fit_image", TEXTURE_FIT_IMAGE},
 	{"fit_overlay", TEXTURE_FIT_OPACITY},
 	{"tile_overlay", TEXTURE_TILE_OPACITY},
 	{"segment_image", TEXTURE_SEGMENT_IMAGE},
 	{"conic_gradient", TEXTURE_CONIC_GRADIENT},
 	{"solid_color", TEXTURE_SOLID},
-	{"solid_color_noclip", TEXTURE_COLOR_NOCLIP},
+	{"solid_color_overlay", TEXTURE_COLOR_NOCLIP},
 	{"static_image", TEXTURE_STATIC_IMAGE},
 	{"segment_color", TEXTURE_COLOR_SEGMENT},
 };
@@ -46,6 +52,7 @@ static const TextureStyleName texture_style_names[] = {
 static struct TextureCacheEntry *texture_cache = NULL;
 static size_t texture_cache_count = 0;
 static size_t texture_cache_cap = 0;
+static uint64_t texture_generation = 0;
 
 // buffer handlers
 static void texture_buffer_destroy(struct wlr_buffer *wlr_buffer) {
@@ -175,13 +182,16 @@ struct wlr_buffer *texture_make_ring(struct wlr_buffer *canvas, int width,
 
 	cairo_set_source_surface(render, source->surface, horizontal_sample_offset,
 							 vertical_sample_offset);
-	cairo_paint(render);
 
 	if (stamp_inside) {
-		cairo_set_operator(render, CAIRO_OPERATOR_CLEAR);
+		cairo_new_path(render);
+		cairo_rectangle(render, 0, 0, width, height);
 		cairo_rounded_rect(render, border, border, width - 2 * border,
 						   height - 2 * border, corners);
+		cairo_set_fill_rule(render, CAIRO_FILL_RULE_EVEN_ODD);
 		cairo_fill(render);
+	} else { 
+		cairo_paint(render);
 	}
 	cairo_destroy(render);
 
@@ -239,19 +249,19 @@ struct wlr_buffer *texture_composite_slots(const BorderTextureKey *slots, struct
 // renderer using TextureOps
 
 bool gradient_key_empty(const BorderTextureKey *key) {
-	return key->gradient.stopcount <= 0;
+	return key->stopcount <= 0;
 }
 
 bool gradient_key_equal(const BorderTextureKey *a,
 							   const BorderTextureKey *b) {
-	if (a->gradient.stopcount != b->gradient.stopcount)
+	if (a->stopcount != b->stopcount)
 		return false;
 
-	for (int index = 0; index < a->gradient.stopcount; index++) {
-		if (memcmp(a->gradient.stops[index].color,
-				   b->gradient.stops[index].color, sizeof(float) * 4) != 0)
+	for (int index = 0; index < a->stopcount; index++) {
+		if (memcmp(a->stops[index].color,
+				   b->stops[index].color, sizeof(float) * 4) != 0)
 			return false;
-		if (a->gradient.stops[index].degree != b->gradient.stops[index].degree)
+		if (a->stops[index].degree != b->stops[index].degree)
 			return false;
 	}
 	return true;
@@ -262,27 +272,32 @@ bool gradient_key_copy(const BorderTextureKey *source,
 	destination->style = source->style;
 	destination->string = NULL;
 
-	if (source->gradient.stopcount <= 0) {
-		destination->gradient.stops = NULL;
-		destination->gradient.stopcount = 0;
+	if (source->stopcount <= 0) {
+		destination->stops = NULL;
+		destination->stopcount = 0;
 		return true;
 	}
 
-	destination->gradient.stops =
-		malloc((size_t)source->gradient.stopcount * sizeof(GradientStop));
-	if (destination->gradient.stops == NULL)
+	destination->stops =
+		malloc((size_t)source->stopcount * sizeof(GradientStop));
+	if (destination->stops == NULL)
 		return false;
-	memcpy(destination->gradient.stops, source->gradient.stops,
-		   (size_t)source->gradient.stopcount * sizeof(GradientStop));
-	destination->gradient.stopcount = source->gradient.stopcount;
+	memcpy(destination->stops, source->stops,
+		   (size_t)source->stopcount * sizeof(GradientStop));
+	destination->stopcount = source->stopcount;
 	return true;
 }
 
 void gradient_key_destroy(BorderTextureKey *key) {
-	free(key->gradient.stops);
-	key->gradient.stops = NULL;
-	key->gradient.stopcount = 0;
+	free(key->stops);
+	key->stops = NULL;
+	key->stopcount = 0;
 }
+
+typedef struct {
+	GradientStop *stops;
+	int stopcount;
+} GradientBorder;
 
 static bool texture_parse_gradient(const char *input, GradientBorder *output) {
 	free(output->stops);
@@ -418,24 +433,80 @@ bool texture_style_skip_make_ring(TextureStyle style) {
 	return ops->skip_make_ring;
 }
 
+static uint32_t texture_hash_bytes(uint32_t hash, const void *bytes,
+								   size_t length) {
+	const uint8_t *current = bytes;
+	for (size_t index = 0; index < length; index++)
+		hash = (hash ^ current[index]) * 16777619u;
+	return hash;
+}
+
+static uint32_t texture_key_hash(const BorderTextureKey *key) {
+	uint32_t hash = texture_hash_bytes(2166136261u, &key->style,
+									   sizeof(key->style));
+	if (key->stopcount > 0) {
+		hash = texture_hash_bytes(hash, &key->stopcount,
+								  sizeof(key->stopcount));
+		for (int index = 0; index < key->stopcount; index++) {
+			GradientStop *stop = &key->stops[index];
+			hash = texture_hash_bytes(hash, stop->color, sizeof(stop->color));
+			hash = texture_hash_bytes(hash, &stop->degree,
+									  sizeof(stop->degree));
+		}
+		return hash;
+	}
+	if (key->string != NULL) {
+		hash = texture_hash_bytes(hash, key->string, strlen(key->string));
+		return hash;
+	}
+	return hash;
+}
+
+static size_t texture_cache_lower_bound(uint32_t hash) {
+	size_t low = 0;
+	size_t high = texture_cache_count;
+	while (low < high) {
+		size_t middle = low + (high - low) / 2;
+		if (texture_cache[middle].hash < hash)
+			low = middle + 1;
+		else
+			high = middle;
+	}
+	return low;
+}
+
+
 static bool texture_cache_store(const BorderTextureKey *key,
 								struct wlr_buffer *canvas) {
 	if (texture_cache_count == texture_cache_cap) {
 		size_t new_cap = texture_cache_cap ? texture_cache_cap * 2 : 8;
-		struct TextureCacheEntry *grown =
-			realloc(texture_cache, new_cap * sizeof(*grown));
-		if (grown == NULL)
+		struct TextureCacheEntry *grown = NULL;
+		if (posix_memalign((void **)&grown, _Alignof(struct TextureCacheEntry), new_cap * sizeof(*grown)) != 0)
 			return false;
+		if (texture_cache != NULL) {
+			memcpy(grown, texture_cache, texture_cache_count * sizeof(*grown));
+			free(texture_cache);
+		}
 		texture_cache = grown;
 		texture_cache_cap = new_cap;
 	}
-	struct TextureCacheEntry *entry = &texture_cache[texture_cache_count];
-	if (!texture_key_copy(key, &entry->key))
-		return false;
-	entry->canvas = canvas;
-	entry->use_count = 0;
+	
+	uint32_t hash = texture_key_hash(key);
+	size_t position = texture_cache_lower_bound(hash);
 
+	memmove(&texture_cache[position + 1], &texture_cache[position], (texture_cache_count -  position) * sizeof(struct TextureCacheEntry));
 	texture_cache_count++;
+
+	struct TextureCacheEntry *entry = &texture_cache[position];
+	memset(entry, 0, sizeof(*entry));
+	if (!texture_key_copy(key, &entry->key)) {
+		memmove(&texture_cache[position], &texture_cache[position + 1], (texture_cache_count - 1 - position) * sizeof(struct TextureCacheEntry));
+		texture_cache_count--;
+		return false;
+	}
+	entry->hash = hash;
+	entry->canvas = canvas;
+	entry->generation = 0;
 	return true;
 }
 
@@ -455,16 +526,26 @@ struct wlr_buffer *texture_cache_get(const BorderTextureKey *key,
 	if (ops->bypass_cache)
 		return ops->render(key, target);
 
-	for (size_t index = 0; index < texture_cache_count; index++) {
+	uint32_t hash = texture_key_hash(key);
+	size_t index = texture_cache_lower_bound(hash);
+	for (; index < texture_cache_count && texture_cache[index].hash == hash; index++) {
 		if (texture_key_equal(&texture_cache[index].key, key)) {
 			*from_cache = true;
 			wlr_buffer_lock(texture_cache[index].canvas);
 			return texture_cache[index].canvas;
 		}
 	}
-	struct wlr_buffer *canvas = ops->render(key, target);
+
+
+		struct wlr_buffer *canvas = ops->render(key, target);
 	if (canvas == NULL)
 		return NULL;
+	for (size_t entry = 0; entry < texture_cache_count; entry++) {
+		if (texture_cache[entry].canvas == canvas) {
+			*from_cache = true;
+			return canvas;
+		}
+	}
 	if (!texture_cache_store(key, canvas)) {
 		wlr_buffer_drop(canvas);
 		return NULL;
@@ -472,25 +553,105 @@ struct wlr_buffer *texture_cache_get(const BorderTextureKey *key,
 	wlr_buffer_lock(canvas);
 	return canvas;
 }
+void texture_prewarm(const BorderTextureKey *key) {
+	if (key == NULL || texture_key_empty(key))
+		return;
+	
+	int pw, ph;
+	max_needed_canvas_size(&pw, &ph);
+
+	char *path = NULL;
+	char *copy = NULL;
+	if (key->style == TEXTURE_FIT_OPACITY && key->string != NULL) {
+		copy = strdup(key->string);
+		if (copy == NULL)
+			return;
+		char *separator = strrchr(copy, '|');
+		if (separator == NULL || *(separator + 1) == '\0') {
+			free(copy);
+			return;
+		}
+		*separator = '\0';
+		path = copy;
+	} else {
+		path = key->string;
+	}
+
+	bool from_cache;
+
+	if (key->style == TEXTURE_FIT_IMAGE ||
+		key->style == TEXTURE_FIT_OPACITY ||
+		key->style == TEXTURE_TILED_IMAGE ||
+		key->style == TEXTURE_SEGMENT_IMAGE ||
+		key->style == TEXTURE_STATIC_IMAGE) {
+		if (path == NULL)
+			return;
+		BorderTextureKey store_key = {.style = TEXTURE_STORE_IMAGE, .string = path};
+		struct wlr_buffer *ref = texture_cache_get(&store_key, NULL, &from_cache);
+		if (ref != NULL)
+			wlr_buffer_unlock(ref);
+		if (pw > 1 && ph > 1) {
+			BorderTextureKey scaled_key = {.style = TEXTURE_STORE_IMAGE_SCALED, .string = path};
+			ref = texture_cache_get(&scaled_key, NULL, &from_cache);
+			if (ref != NULL)
+				wlr_buffer_unlock(ref);
+		}
+		if (key->style == TEXTURE_FIT_OPACITY)
+			free(path);
+
+	}
+
+	if ((pw > 0 && ph > 0) &&
+		(key->style == TEXTURE_STATIC_IMAGE ||
+		 key->style == TEXTURE_TILED_IMAGE)) {
+		Client dummy = {0};
+		struct wlr_buffer *ref = texture_cache_get(key, &dummy, &from_cache);
+		if (ref != NULL)
+			wlr_buffer_unlock(ref);
+	}
+}
+
+static void texture_cache_count_use(const BorderTextureKey *key) {
+	if (texture_key_empty(key))
+		return;
+	uint32_t hash = texture_key_hash(key);
+	size_t index = texture_cache_lower_bound(hash);
+	for (; index < texture_cache_count &&
+		   texture_cache[index].hash == hash; index++)
+		if (texture_key_equal(&texture_cache[index].key, key))
+			texture_cache[index].generation = texture_generation;
+}
+
 
 static void texture_use_count(void) {
-	for (size_t index = 0; index < texture_cache_count; index++)
-		texture_cache[index].use_count = 0;
+	texture_generation++;
 
 	Client *client;
 	wl_list_for_each(client, &server.clients, link) {
 		for (int slot = 0; slot < MANGO_TEXTURE_SLOTS; slot++) {
-			for (size_t index = 0; index < texture_cache_count; index++) {
-				if (texture_key_equal(&texture_cache[index].key,
-									  &client->active_textures[slot]))
-					texture_cache[index].use_count++;
-				if (texture_key_equal(&texture_cache[index].key,
-									  &client->inactive_textures[slot]))
-					texture_cache[index].use_count++;
-			}
+			texture_cache_count_use(&client->active_textures[slot]);
+			texture_cache_count_use(&client->inactive_textures[slot]);
 		}
 	}
 }
+static bool texture_style_persists(TextureStyle style) {
+    switch (style) {
+    case TEXTURE_STORE_IMAGE:
+	case TEXTURE_STORE_IMAGE_SCALED:
+    case TEXTURE_SEGMENT_TILE_TOP:
+    case TEXTURE_SEGMENT_TILE_BOTTOM:
+    case TEXTURE_SEGMENT_TILE_LEFT:
+    case TEXTURE_SEGMENT_TILE_RIGHT:
+    case TEXTURE_SEGMENT_TILE_TL:
+    case TEXTURE_SEGMENT_TILE_TR:
+    case TEXTURE_SEGMENT_TILE_BL:
+    case TEXTURE_SEGMENT_TILE_BR:
+        return true;
+    default:
+        return false;
+    }
+}
+
 
 void texture_collect_garbage(bool clean_image_store) {
 	texture_use_count();
@@ -499,9 +660,9 @@ void texture_collect_garbage(bool clean_image_store) {
 	for (size_t read = 0; read < texture_cache_count; read++) {
 		struct TextureCacheEntry *entry = &texture_cache[read];
 
-		bool is_store_image = entry->key.style == TEXTURE_STORE_IMAGE;
-		if (entry->use_count == 0 &&
-			(!is_store_image || clean_image_store)) {
+		bool persists = texture_style_persists(entry->key.style);
+		if (entry->generation != texture_generation &&
+			(!persists || clean_image_store)) {
 			texture_key_destroy(&entry->key);
 			wlr_buffer_drop(entry->canvas);
 			continue;
@@ -551,12 +712,15 @@ bool texture_parse_value(const char *value, BorderTextureKey *out) {
 	if (out->string == NULL)
 		return false;
 	if (style == TEXTURE_CONIC_GRADIENT) {
-		bool parsed = texture_parse_gradient(out->string, &out->gradient);
-		if (!parsed) {
+		GradientBorder parsed = {0};
+		if (!texture_parse_gradient(out->string, &parsed)) {
 			free(out->string);
 			out->string = NULL;
+			return false;
 		}
-		return parsed;
+		out->stops = parsed.stops;
+		out->stopcount = parsed.stopcount;
+		return true;
 	}
 	return true;
 }
@@ -600,14 +764,8 @@ void init_texture_system(void) {
 		.key_copy = string_key_copy,
 		.key_destroy = string_key_destroy,
 		.bypass_cache = true,
+		.skip_make_ring = true, // handles ring intrinsically, skip for performance
 		.render = texture_render_linear,
-	};
-	struct TextureOps gradient_ops = {
-		.key_empty = gradient_key_empty,
-		.key_equal = gradient_key_equal,
-		.key_copy = gradient_key_copy,
-		.key_destroy = gradient_key_destroy,
-		.render = texture_render_gradient,
 	};
 	struct TextureOps radial_gradient_ops = {
 		.key_empty = string_key_empty,
@@ -615,6 +773,7 @@ void init_texture_system(void) {
 		.key_copy = string_key_copy,
 		.key_destroy = string_key_destroy,
 		.bypass_cache = true,
+		.skip_make_ring = true, // handles ring intrinsically, skip for performance
 		.render = texture_render_radial,
 	};
 	struct TextureOps tiled_image_ops = {
@@ -710,8 +869,15 @@ void init_texture_system(void) {
 		.bypass_cache = false,
 		.render = texture_render_store_image,
 	};
+	struct TextureOps store_image_scaled_ops = {
+		.key_empty = string_key_empty,
+		.key_equal = string_key_equal,
+		.key_copy = string_key_copy,
+		.key_destroy = string_key_destroy,
+		.bypass_cache = false,
+		.render = texture_render_store_image_scaled,
+	};
 
-	texture_style_register(TEXTURE_GRADIENT, gradient_ops);
 	texture_style_register(TEXTURE_LINEAR_GRADIENT, linear_gradient_ops);
 	texture_style_register(TEXTURE_RADIAL_GRADIENT, radial_gradient_ops);
 	texture_style_register(TEXTURE_TILED_IMAGE, tiled_image_ops);
@@ -725,4 +891,33 @@ void init_texture_system(void) {
 	texture_style_register(TEXTURE_COLOR_NOCLIP, solid_noclip_ops);
 	texture_style_register(TEXTURE_COLOR_SEGMENT, segment_color_ops);
 	texture_style_register(TEXTURE_STORE_IMAGE, store_image_ops);
+	texture_style_register(TEXTURE_STORE_IMAGE_SCALED, store_image_scaled_ops);
+
+	 const struct {
+        TextureStyle style;
+        struct wlr_buffer *(*render)(const BorderTextureKey *, Client *);
+    } segment_tile_styles[] = {
+        { TEXTURE_SEGMENT_TILE_TOP, texture_render_segment_top },
+        { TEXTURE_SEGMENT_TILE_BOTTOM, texture_render_segment_bottom },
+        { TEXTURE_SEGMENT_TILE_LEFT, texture_render_segment_left },
+        { TEXTURE_SEGMENT_TILE_RIGHT, texture_render_segment_right },
+        { TEXTURE_SEGMENT_TILE_TL, texture_render_segment_tl },
+        { TEXTURE_SEGMENT_TILE_TR, texture_render_segment_tr },
+        { TEXTURE_SEGMENT_TILE_BL, texture_render_segment_bl },
+        { TEXTURE_SEGMENT_TILE_BR, texture_render_segment_br },
+    };
+
+    for (size_t index = 0;
+         index < sizeof(segment_tile_styles) / sizeof(segment_tile_styles[0]);
+         index++) {
+        struct TextureOps tile_ops = {
+            .key_empty = string_key_empty,
+            .key_equal = string_key_equal,
+            .key_copy = string_key_copy,
+            .key_destroy = string_key_destroy,
+            .skip_make_ring = true,
+            .render = segment_tile_styles[index].render,
+        };
+        texture_style_register(segment_tile_styles[index].style, tile_ops);
+    }
 }

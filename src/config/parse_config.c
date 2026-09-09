@@ -3409,16 +3409,16 @@ void free_config(void) {
 				free((void *)rule->globalkeybinding.arg.v);
 			}
 			for (int i = 0; i < MANGO_TEXTURE_SLOTS; i++) {
-				if (rule->active_textures[i].gradient.stops)
-					free(rule->active_textures[i].gradient.stops);
-				if (rule->inactive_textures[i].gradient.stops)
-					free(rule->inactive_textures[i].gradient.stops);
+				if (rule->active_textures[i].stops)
+					free(rule->active_textures[i].stops);
+				if (rule->inactive_textures[i].stops)
+					free(rule->inactive_textures[i].stops);
 				free(rule->active_textures[i].string);
 				free(rule->inactive_textures[i].string);
-				rule->active_textures[i].gradient.stops = NULL;
-				rule->active_textures[i].gradient.stopcount = 0;
-				rule->inactive_textures[i].gradient.stops = NULL;
-				rule->inactive_textures[i].gradient.stopcount = 0;
+				rule->active_textures[i].stops = NULL;
+				rule->active_textures[i].stopcount = 0;
+				rule->inactive_textures[i].stops = NULL;
+				rule->inactive_textures[i].stopcount = 0;
 				rule->active_textures[i].string = NULL;
 				rule->inactive_textures[i].string = NULL;
 			}
@@ -3675,16 +3675,16 @@ void free_config(void) {
 
 	// border textures
 	for (int i = 0; i < MANGO_TEXTURE_SLOTS; i++) {
-				if (config.active_textures[i].gradient.stops)
-					free(config.active_textures[i].gradient.stops);
-				if (config.inactive_textures[i].gradient.stops)
-					free(config.inactive_textures[i].gradient.stops);
+				if (config.active_textures[i].stops)
+					free(config.active_textures[i].stops);
+				if (config.inactive_textures[i].stops)
+					free(config.inactive_textures[i].stops);
 				free(config.active_textures[i].string);
 				free(config.inactive_textures[i].string);
-				config.active_textures[i].gradient.stops = NULL;
-				config.active_textures[i].gradient.stopcount = 0;
-				config.inactive_textures[i].gradient.stops = NULL;
-				config.inactive_textures[i].gradient.stopcount = 0;
+				config.active_textures[i].stops = NULL;
+				config.active_textures[i].stopcount = 0;
+				config.inactive_textures[i].stops = NULL;
+				config.inactive_textures[i].stopcount = 0;
 				config.active_textures[i].string = NULL;
 				config.inactive_textures[i].string = NULL;
 			}
@@ -4664,6 +4664,19 @@ void reset_tag(int old_tag_num) {
 		}
 	}
 }
+void texture_prewarm_all(void) {
+	for (int slot = 0; slot < MANGO_TEXTURE_SLOTS; slot++) {
+		texture_prewarm(&config.active_textures[slot]);
+		texture_prewarm(&config.inactive_textures[slot]);
+	}
+	for (int i = 0; i < config.window_rules_count; i++) {
+		ConfigWinRule *rule = &config.window_rules[i];
+		for (int slot = 0; slot < MANGO_TEXTURE_SLOTS; slot++) {
+			texture_prewarm(&rule->active_textures[slot]);
+			texture_prewarm(&rule->inactive_textures[slot]);
+		}
+	}
+}
 
 void reload_config(const Arg *arg) {
 	int old_tag_num = config.tag_num;
@@ -4671,6 +4684,7 @@ void reload_config(const Arg *arg) {
 	reset_tag(old_tag_num);
 	reset_option();
 	texture_collect_garbage(true);
+	texture_prewarm_all();
 	printstatus(IPC_WATCH_ARRANGGE);
 	return;
 }
