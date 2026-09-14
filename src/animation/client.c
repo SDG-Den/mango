@@ -69,9 +69,9 @@ struct fx_corner_radii set_client_corner_location(Client *c) {
 		return current_corner_location;
 
 	struct wlr_box target_geom =
-		config.animations ? c->animation.current : c->geom;
-	
 		client_animations_enabled(c) ? c->animation.current : c->geom;
+	
+	
 	if (target_geom.x + radius <= c->mon->m.x) {
 		current_corner_location.top_left = 0;
 		current_corner_location.bottom_left = 0;
