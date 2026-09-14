@@ -23,6 +23,7 @@ enum { AxisUp, AxisDown, AxisLeft, AxisRight };
 typedef struct PointerConstraint {
 	struct wlr_pointer_constraint_v1 *constraint;
 	struct wl_listener destroy;
+	struct wl_listener commit;
 } PointerConstraint;
 
 struct LastCursor {
@@ -33,21 +34,10 @@ struct LastCursor {
 };
 
 void toggle_hotarea(int32_t x_root, int32_t y_root);
-bool pointer_is_trackpad(struct wlr_pointer *pointer);
 void // Mouse scroll wheel event
 handle_cursor_axis(struct wl_listener *listener, void *data);
-int32_t pointer_process_swipe_end(struct wlr_pointer_swipe_end_event *event);
-void handle_cursor_swipe_begin(struct wl_listener *listener, void *data);
-void handle_cursor_swipe_update(struct wl_listener *listener, void *data);
-void handle_cursor_swipe_end(struct wl_listener *listener, void *data);
-void handle_cursor_pinch_begin(struct wl_listener *listener, void *data);
-void handle_cursor_pinch_update(struct wl_listener *listener, void *data);
-void handle_cursor_pinch_end(struct wl_listener *listener, void *data);
-void handle_cursor_hold_begin(struct wl_listener *listener, void *data);
-void handle_cursor_hold_end(struct wl_listener *listener, void *data);
 Client *find_closest_tiled_client(Client *c);
 void pointer_place_drag_tile(Client *c);
-bool check_trackpad_disabled(struct wlr_pointer *pointer);
 void // Mouse button event
 handle_cursor_button(struct wl_listener *listener, void *data);
 bool pointer_process_button_press(struct wlr_pointer_button_event *event);
@@ -61,14 +51,19 @@ void configure_pointer(struct wlr_input_device *wlr_device,
 					   struct libinput_device *device);
 void pointer_create(struct wlr_pointer *pointer);
 void handle_new_pointer_constraint(struct wl_listener *listener, void *data);
+void handle_pointer_constraint_commit(struct wl_listener *listener, void *data);
 void pointer_constrain_cursor(struct wlr_pointer_constraint_v1 *constraint);
+void pointer_check_confine_client(void);
+void pointer_client_destroyed(Client *c);
 void handle_cursor_frame(struct wl_listener *listener, void *data);
 void pointer_warp_to_constraint_hint(void);
 void handle_drag_icon_destroy(struct wl_listener *listener, void *data);
 void handle_pointer_constraint_destroy(struct wl_listener *listener,
 									   void *data);
 void handle_cursor_motion_absolute(struct wl_listener *listener, void *data);
-void pointer_resize_floating_window(Client *gc);
+void pointer_resize_floating_window(Client *gc, double x, double y);
+bool pointer_begin_move_resize(Client *gc, uint32_t mode, double x, double y);
+void pointer_end_grab_client(bool follow_pointer);
 void pointer_process_motion(uint32_t time, struct wlr_input_device *device,
 							double dx, double dy, double dx_unaccel,
 							double dy_unaccel);

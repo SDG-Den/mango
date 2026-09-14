@@ -8,6 +8,7 @@
 #include "mango/manage/misc.h"
 #include "mango/manage/monitor.h"
 #include "mango/overview/overview.h"
+#include <math.h>
 #include <scenefx/types/wlr_scene.h>
 #include <stdint.h>
 #include <wlr/types/wlr_compositor.h>
@@ -18,6 +19,17 @@
 #ifdef XWAYLAND
 #include <wlr/xwayland.h>
 #endif
+
+static bool client_gesture_driven(const Client *c) {
+	return server.gesture_drive_active && c &&
+		   c->mon == server.gesture_drive_mon;
+}
+
+bool client_animations_enabled(const Client *c) {
+	if (config.animations)
+		return true;
+	return client_gesture_driven(c);
+}
 
 bool client_is_ignore_output_clip(Client *c) {
 	return c == server.grab_client ||
@@ -55,7 +67,7 @@ struct fx_corner_radii set_client_corner_location(Client *c) {
 		return current_corner_location;
 
 	struct wlr_box target_geom =
-		config.animations ? c->animation.current : c->geom;
+		client_animations_enabled(c) ? c->animation.current : c->geom;
 	if (target_geom.x + config.border_radius <= c->mon->m.x) {
 		current_corner_location.top_left = 0;
 		current_corner_location.bottom_left = 0;
@@ -112,11 +124,10 @@ int32_t is_special_animation_rule(Client *c) {
 }
 
 void set_overview_enter_animation(Client *c) {
-	struct wlr_box geo = c->geom;
-	c->animainit_geom.width = geo.width * 1.2;
-	c->animainit_geom.height = geo.height * 1.2;
-	c->animainit_geom.x = geo.x + (geo.width - c->animainit_geom.width) / 2;
-	c->animainit_geom.y = geo.y + (geo.height - c->animainit_geom.height) / 2;
+	struct wlr_box start = c->overview_backup_geom;
+	if (start.width <= 0 || start.height <= 0)
+		start = c->animation.current;
+	c->animainit_geom = start;
 }
 
 void set_client_open_animation(Client *c, struct wlr_box geo) {
@@ -424,8 +435,10 @@ void client_draw_groupbar(Client *c, struct ivec2 offsets) {
 		tab_y = c->mon->m.y;
 		th = config.group_bar_height - top_over;
 	}
-	if (bottom_over > 0)
-		th = th - bottom_over;
+	if (bottom_over > 0) {
+		th = th - GEZERO(bottom_over - c->animation.current.height);
+	}
+
 	if (right_over > 0)
 		tw = tw - right_over;
 	if (left_over > 0) {
@@ -716,7 +729,8 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box,
 		(ISSCROLLTILED(c) || c->animation.tagouting || c->animation.tagining)) {
 		c->is_clip_to_hide = true;
 		wlr_scene_node_set_enabled(&c->scene->node, false);
-	} else if (c->is_clip_to_hide && VISIBLEON(c, c->mon)) {
+	} else if (c->is_clip_to_hide &&
+			   (VISIBLEON(c, c->mon) || client_gesture_driven(c))) {
 		c->is_clip_to_hide = false;
 		wlr_scene_node_set_enabled(&c->scene->node, true);
 	}
@@ -921,7 +935,10 @@ void client_apply_clip(Client *c, float factor) {
 
 		struct wlr_box clip_box;
 		struct ivec2 surface_clip_offset;
-		client_get_clip(c, &clip_box);
+		int32_t card_w, card_h;
+		client_actual_size(c, &card_w, &card_h);
+		clip_box =
+			(struct wlr_box){.x = 0, .y = 0, .width = card_w, .height = card_h};
 		surface_clip_offset = clip_to_hide(c, &clip_box, offsets);
 
 		/* Decorations are drawn against the card geometry. */
@@ -946,7 +963,7 @@ void client_apply_clip(Client *c, float factor) {
 	struct fx_corner_radii current_corner_location =
 		set_client_corner_location(c);
 
-	if (!config.animations && !c->overview_scene_surface) {
+	if (!client_animations_enabled(c) && !c->overview_scene_surface) {
 		c->animation.running = false;
 		c->need_output_flush = false;
 		c->animainit_geom = c->current = c->pending = c->animation.current =
@@ -1296,6 +1313,67 @@ void client_apply_finish_geometry(Client *c) {
 	client_apply_clip(c, 1.0);
 	c->need_output_flush = false;
 }
+void client_animation_set_progress(Client *c, double p) {
+	if (!c || !c->scene)
+		return;
+
+	if (p < 0.0)
+		p = 0.0;
+	if (p > 1.0)
+		p = 1.0;
+
+	const struct wlr_box *from = &c->animation.initial;
+	const struct wlr_box *to = &c->current;
+
+	int32_t width =
+		(int32_t)llround(from->width + (to->width - from->width) * p);
+	int32_t height =
+		(int32_t)llround(from->height + (to->height - from->height) * p);
+	int32_t x = (int32_t)llround(from->x + (to->x - from->x) * p);
+	int32_t y = (int32_t)llround(from->y + (to->y - from->y) * p);
+
+	wlr_scene_node_set_position(&c->scene->node, x, y);
+	c->animation.current = (struct wlr_box){
+		.x = x,
+		.y = y,
+		.width = width,
+		.height = height,
+	};
+
+	c->is_pending_open_animation = false;
+	client_apply_clip(c, 1.0f);
+}
+void client_animation_resume(Client *c, double remaining) {
+	if (!c || !c->scene)
+		return;
+
+	if (!c->animation.running)
+		return;
+
+	if (!config.animations || c->animation.duration == 0 || remaining < 0.05) {
+		client_animation_set_progress(c, 1.0);
+		c->animation.action = MOVE;
+		c->animation.tagining = false;
+		c->animation.overining = false;
+		c->animation.running = false;
+		if (c->animation.tagouting) {
+			c->animation.tagouting = false;
+			wlr_scene_node_set_enabled(&c->scene->node, false);
+			c->animation.tagouted = true;
+			c->animation.current = c->geom;
+		}
+		c->need_output_flush = false;
+		return;
+	}
+
+	c->animation.initial = c->animation.current;
+	c->animation.duration =
+		(uint32_t)MANGO_MAX(1, (int32_t)(c->animation.duration * remaining));
+	c->animation.time_started = get_now_in_ms();
+	c->animation.running = true;
+	c->need_output_flush = true;
+	request_fresh_all_monitors();
+}
 void client_commit(Client *c) {
 	c->current = c->pending;
 
@@ -1316,7 +1394,7 @@ void client_commit(Client *c) {
 	// When animation is disabled, set the surface position and size early
 	// so pointer_process_motion focus does not hit the surface from the
 	// previous frame.
-	if (!config.animations)
+	if (!client_animations_enabled(c))
 		client_apply_finish_geometry(c);
 
 	request_fresh_all_monitors();
@@ -1325,11 +1403,11 @@ void client_set_pending_state(Client *c) {
 	if (!c || c->iskilling)
 		return;
 
-	if (!config.animations)
+	if (!client_animations_enabled(c))
 		c->animation.should_animate = false;
-	else if (config.animations && c->animation.tagining)
+	else if (c->animation.tagining)
 		c->animation.should_animate = true;
-	else if (config.animations && c->animation.action == OVERVIEW &&
+	else if (c->animation.action == OVERVIEW &&
 			 c->animation.overview_enter_anim_set)
 		/* Overview enter animation: force start after setting the zoom; not
 		 * forced during pre-arrangement to avoid jitter. */
@@ -1393,10 +1471,11 @@ void resize_apply(Client *c, struct wlr_box geo, ResizeOpts opts) {
 	if (!c->is_pending_open_animation)
 		c->animation.begin_fade_in = false;
 
-	if (c->animation.overining)
+	if (c->animation.overining) {
 		c->animation.action = OVERVIEW;
-	else if (c->animation.action == OPEN && !c->animation.tagining &&
-			 !c->animation.tagouting && wlr_box_equal(&c->geom, &c->current))
+		c->animation.duration = config.animation_duration_tag;
+	} else if (c->animation.action == OPEN && !c->animation.tagining &&
+			   !c->animation.tagouting && wlr_box_equal(&c->geom, &c->current))
 		; /* keep current action */
 	else if (c->animation.tagouting) {
 		c->animation.duration = config.animation_duration_tag;
@@ -1479,20 +1558,11 @@ void resize_apply(Client *c, struct wlr_box geo, ResizeOpts opts) {
 	if (c->scratchpad_switching_mon && c->isfloating)
 		c->animainit_geom = c->geom;
 
-	if (!opts.skip_ov_enter_anim) {
-		/* Clears the enter-animation flag (including the focused window) to
-		 * avoid re-zooming when focus changes. */
-		if (config.animations && c->mon->isoverview && c->animation.overining &&
-			!c->animation.overview_enter_anim_set)
-			c->animation.overining = false;
-
-		/* Sets the enter zoom animation for all windows except sel. */
-		if (config.animations && c->mon->isoverview && c != c->mon->sel &&
-			c->animation.action == OVERVIEW &&
-			!c->animation.overview_enter_anim_set) {
-			c->animation.overview_enter_anim_set = true;
-			set_overview_enter_animation(c);
-		}
+	if (!opts.skip_ov_enter_anim && c->mon->isoverview &&
+		c->animation.overining && !c->animation.overview_enter_anim_set) {
+		set_overview_enter_animation(c);
+		c->animation.overining = false;
+		c->animation.overview_enter_anim_set = true;
 	}
 
 	client_set_pending_state(c);
@@ -1661,6 +1731,11 @@ bool client_draw_frame(Client *c) {
 	if (c->force_render && !c->scene->node.enabled) {
 		force_render = client_force_render(c);
 		need_next_tick = force_render || need_next_tick;
+	}
+
+	if (server.gesture_drive_active && c->mon == server.gesture_drive_mon &&
+		c->animation.running && c->need_output_flush) {
+		return client_apply_focus_opacity(c);
 	}
 
 	if (!c->need_output_flush)

@@ -18,6 +18,7 @@
 #include "mango/input/keyboard.h"
 #include "mango/input/pointer.h"
 #include "mango/input/tablet.h"
+#include "mango/input/trackpad.h"
 #include "mango/ipc/ipc.h"
 #include "mango/layout/arrange.h"
 #include "mango/manage/misc.h"
@@ -115,7 +116,6 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
-#include <wordexp.h>
 #include <xkbcommon/xkbcommon.h>
 #ifdef XWAYLAND
 #include <X11/Xlib.h>
@@ -144,7 +144,7 @@ static void restore_child_signals(void) {
 }
 
 void cleanup_listeners(void) {
-	wl_list_remove(&server.ext_workspace_commit_listener.link); // 0.7
+	wl_list_remove(&server.ext_workspace_commit_listener.link);
 	wl_list_remove(&server.print_status_listener.link);
 	wl_list_remove(&server.cursor_axis_listener.link);
 	wl_list_remove(&server.cursor_button_listener.link);
@@ -266,22 +266,29 @@ void set_activation_env() {
 	spawn(&(Arg){.v = cmd1});
 	free(cmd1);
 
-	// second command: systemctl --user
+	/* Second command: import the environment into systemd and bring up the
+	 * session target from the same shell, so that user services with
+	 * WantedBy=graphical-session.target (portals, panels, ...) do not start
+	 * before those variables are in place. xdg-desktop-portal only starts
+	 * while graphical-session.target is active, which this target pulls in
+	 * via BindsTo. */
 	const char *action = "import-environment";
-	char *cmd2 = string_printf("systemctl --user %s %s", action, env_keys);
+	char *cmd2 = string_printf("systemctl --user %s %s; "
+							   "systemctl --user --no-block start "
+							   "mango-session.target",
+							   action, env_keys);
 	if (!cmd2) {
 		mango_error(true, WLR_ERROR, "Failed to allocate command string");
 		goto cleanup;
 	}
-	spawn(&(Arg){.v = cmd2});
+	spawn_shell(&(Arg){.v = cmd2});
 	free(cmd2);
 
 cleanup:
 	free(env_keys);
 }
 
-void // 17
-run(char *startup_cmd, int readiness_fd) {
+void run(char *startup_cmd, int readiness_fd) {
 	/* Add a Unix socket to the Wayland display. */
 	const char *socket = wl_display_add_socket_auto(server.display);
 	if (!socket)
@@ -318,7 +325,7 @@ run(char *startup_cmd, int readiness_fd) {
 	}
 
 	/* Mark stdout as non-blocking to avoid people who does not close stdin
-	 * nor consumes it in their startup script getting dwl frozen */
+	 * nor consumes it in their startup script getting mango frozen */
 	if (fd_set_nonblock(STDOUT_FILENO) < 0)
 		close(STDOUT_FILENO);
 
@@ -685,7 +692,6 @@ void setup(void) {
 				  &server.tablet_tool_tip_listener);
 
 	// These two lines make the mouse cursor disappear in OBS windows;
-	// not sure what this comment is about.
 	server.cursor_shape_manager =
 		wlr_cursor_shape_manager_v1_create(server.display, 1);
 	wl_signal_add(&server.cursor_shape_manager->events.request_set_shape,

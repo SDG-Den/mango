@@ -115,15 +115,32 @@ void create_virtual_output(const Arg *arg) {
 		return;
 	}
 
+	if (arg->v != NULL) {
+		Monitor *m;
+		wl_list_for_each(m, &server.monitors, link) {
+			if (strcmp(m->wlr_output->name, arg->v) == 0) {
+				mango_error(true, WLR_ERROR, "Output '%s' already exists",
+							arg->v);
+				return;
+			}
+		}
+	}
+
 	bool done = false;
+	server.pending_headless_output_name = arg->v;
 	wlr_multi_for_each_backend(server.backend, create_output, &done);
+	server.pending_headless_output_name = NULL;
 
 	if (!done) {
 		mango_error(true, WLR_ERROR, "Failed to create virtual output");
 		return;
 	}
 
-	mango_error(true, WLR_INFO, "Virtual output created");
+	if (arg->v) {
+		mango_error(true, WLR_INFO, "Virtual output '%s' created", arg->v);
+	} else {
+		mango_error(true, WLR_INFO, "Virtual output created");
+	}
 	return;
 }
 
@@ -171,6 +188,33 @@ void exchange_client(const Arg *arg) {
 
 	client_exchange(c, tc);
 	return;
+}
+
+void move_client(const Arg *arg) {
+	if (!server.selected_monitor)
+		return;
+
+	Client *c = arg->tc ? arg->tc : server.selected_monitor->sel;
+	if (!c || !c->mon || c->isfloating)
+		return;
+
+	if ((c->isfullscreen || c->ismaximizescreen) && !is_scroller_layout(c->mon))
+		return;
+
+	Client *tc = direction_select(arg);
+
+	if (!tc) {
+		client_jump_to_monitor(c, monitor_from_direction(arg->i), arg->i);
+	} else if (tc->mon->pertag->ltidxs[get_mon_curtag(tc->mon)]->id ==
+			   DWINDLE) {
+		dwindle_move_next_to(c, tc, config.dwindle_split_ratio, arg->i);
+	} else {
+		tc = get_focused_stack_client(tc, c);
+		client_exchange(c, tc);
+	}
+
+	if (config.warpcursor)
+		pointer_warp_to_client(c);
 }
 
 void exchange_stack_client(const Arg *arg) {
@@ -376,26 +420,27 @@ void over_circle(const Arg *arg) {
 
 	Client *sel = arg->tc ? arg->tc : server.selected_monitor->sel;
 
+	bool next = arg->i == OVERCIRCLE_NEXT || arg->i == OVERCIRCLE_CURRENT_NEXT;
+	bool current =
+		arg->i == OVERCIRCLE_CURRENT_NEXT || arg->i == OVERCIRCLE_CURRENT_PREV;
+
 	if (server.selected_monitor->isoverview &&
 		!server.selected_monitor->is_jump_mode &&
 		!server.selected_monitor->ov_normal_mode && sel) {
 		server.selected_monitor->ov_tab_layout = 1;
-		Client *tc = arg->i == NEXT ? get_next_stack_client(sel, false)
-									: get_next_stack_client(sel, true);
+		Client *tc = next ? get_next_stack_client(sel, false)
+						  : get_next_stack_client(sel, true);
 		if (!tc)
 			return;
 
 		client_focus(tc, 1);
 
-		/* Rearranges after focus change so the tab layout follows focus. */
 		arrange(server.selected_monitor, true, false);
 		return;
 	}
 
-	/* Entering overview: enables the centered tab layout; the rest is handled
-	 * by toggle_overview. */
 	server.selected_monitor->ov_tab_layout = 1;
-	toggle_overview(arg);
+	toggle_overview(&(Arg){.tc = arg->tc, .i = current});
 	if (!server.selected_monitor->isoverview)
 		server.selected_monitor->ov_tab_layout = 0;
 }
@@ -517,88 +562,14 @@ void kill_client(const Arg *arg) {
 }
 
 void move_resize(const Arg *arg) {
-	const char *cursors[] = {"nw-resize", "ne-resize", "sw-resize",
-							 "se-resize"};
+	Client *c = NULL;
 
 	if (server.cursor_mode != CurNormal && server.cursor_mode != CurPressed)
 		return;
-	node_at_point(server.cursor->x, server.cursor->y, NULL, &server.grab_client,
-				  NULL, NULL, NULL, NULL);
-	if (!server.grab_client || client_is_unmanaged(server.grab_client) ||
-		server.grab_client->isfullscreen ||
-		server.grab_client->ismaximizescreen) {
-		server.grab_client = NULL;
-		return;
-	}
-	if (server.grab_client->isfloating == 0 && arg->ui == CurMove) {
-		server.grab_client->drag_to_tile = true;
-		exit_scroller_stack(server.grab_client);
-		client_set_floating(server.grab_client, 1);
-		server.grab_client->drag_tile_float_backup_geom =
-			server.grab_client->float_geom;
-		server.grab_client->old_stack_inner_per = 0.0f;
-		server.grab_client->old_master_inner_per = 0.0f;
-		set_size_per(server.grab_client->mon, server.grab_client);
-	}
 
-	if (server.grab_client && server.grab_client->drag_to_tile &&
-		config.drag_tile_to_tile && config.drag_tile_small) {
-		server.grab_client->geom.x = server.cursor->x - 150;
-		server.grab_client->geom.y = server.cursor->y - 150;
-		server.grab_client->geom.width = 300;
-		server.grab_client->geom.height = 300;
-		resize(server.grab_client, server.grab_client->geom, 1);
-	}
-
-	switch (server.cursor_mode = arg->ui) {
-	case CurMove:
-		server.grab_offset_x = server.cursor->x - server.grab_client->geom.x;
-		server.grab_offset_y = server.cursor->y - server.grab_client->geom.y;
-		wlr_cursor_set_xcursor(server.cursor, server.cursor_manager, "grab");
-		break;
-	case CurResize:
-		if (server.grab_client->isfloating) {
-			server.resize_corner = config.drag_corner;
-			server.grab_offset_x = (int)round(server.cursor->x);
-			server.grab_offset_y = (int)round(server.cursor->y);
-			if (server.resize_corner == 4)
-				server.resize_corner =
-					(server.grab_offset_x - server.grab_client->geom.x <
-							 server.grab_client->geom.x +
-								 server.grab_client->geom.width -
-								 server.grab_offset_x
-						 ? 0
-						 : 1) +
-					(server.grab_offset_y - server.grab_client->geom.y <
-							 server.grab_client->geom.y +
-								 server.grab_client->geom.height -
-								 server.grab_offset_y
-						 ? 0
-						 : 2);
-
-			if (config.drag_warp_cursor) {
-				server.grab_offset_x = server.resize_corner & 1
-										   ? server.grab_client->geom.x +
-												 server.grab_client->geom.width
-										   : server.grab_client->geom.x;
-				server.grab_offset_y = server.resize_corner & 2
-										   ? server.grab_client->geom.y +
-												 server.grab_client->geom.height
-										   : server.grab_client->geom.y;
-				wlr_cursor_warp_closest(server.cursor, NULL,
-										server.grab_offset_x,
-										server.grab_offset_y);
-			}
-
-			wlr_cursor_set_xcursor(server.cursor, server.cursor_manager,
-								   cursors[server.resize_corner]);
-		} else {
-			wlr_cursor_set_xcursor(server.cursor, server.cursor_manager,
-								   "grab");
-		}
-		break;
-	}
-	return;
+	node_at_point(server.cursor->x, server.cursor->y, NULL, &c, NULL, NULL,
+				  NULL, NULL);
+	pointer_begin_move_resize(c, arg->ui, server.cursor->x, server.cursor->y);
 }
 
 void move_window(const Arg *arg) {
@@ -731,14 +702,14 @@ void restore_minimized(const Arg *arg) {
 		focused = client_focus_top(server.selected_monitor);
 
 	/* 1. If focused window or any shown scratchpad exists, evict it */
-	if (focused && focused->is_in_scratchpad && focused->is_scratchpad_show) {
+	if (focused && SCRATCHPAD_SHOWN(focused)) {
 		c = focused;
 	} else {
 		Client *tc = NULL;
 		wl_list_for_each(tc, &server.clients, link) {
 			if ((tc->mon == server.selected_monitor ||
 				 config.scratchpad_cross_monitor) &&
-				tc->is_in_scratchpad && tc->is_scratchpad_show) {
+				SCRATCHPAD_SHOWN(tc)) {
 				c = tc;
 				break;
 			}
@@ -759,10 +730,8 @@ void restore_minimized(const Arg *arg) {
 		return;
 
 	/* Clear scratchpad & minimized state */
-	c->is_scratchpad_show = 0;
 	c->is_in_scratchpad = 0;
 	c->isnamedscratchpad = 0;
-	c->isminimized = 0;
 	client_pending_minimized_state(c, 0);
 	c->iscustomsize = 0;
 
@@ -1684,7 +1653,6 @@ void toggle_fullscreen(const Arg *arg) {
 	if (!sel)
 		return;
 
-	sel->is_scratchpad_show = 0;
 	sel->is_in_scratchpad = 0;
 	sel->isnamedscratchpad = 0;
 
@@ -1705,7 +1673,6 @@ void toggle_global(const Arg *arg) {
 
 	if (c->is_in_scratchpad) {
 		c->is_in_scratchpad = 0;
-		c->is_scratchpad_show = 0;
 		c->isnamedscratchpad = 0;
 	}
 	c->isglobal ^= 1;
@@ -1730,7 +1697,6 @@ void toggle_maximize_screen(const Arg *arg) {
 	if (!sel)
 		return;
 
-	sel->is_scratchpad_show = 0;
 	sel->is_in_scratchpad = 0;
 	sel->isnamedscratchpad = 0;
 
@@ -1979,6 +1945,14 @@ void view_to_right_have_client(const Arg *arg) {
 	view_shift_tag_have_client(arg, 1);
 }
 
+void viewprev_have_client(const Arg *arg) {
+	view_shift_tag_have_client(arg, -1);
+}
+
+void viewnext_have_client(const Arg *arg) {
+	view_shift_tag_have_client(arg, 1);
+}
+
 void view_cross_monitor(const Arg *arg) {
 	if (!server.selected_monitor)
 		return;
@@ -2089,30 +2063,39 @@ void fix_mon_tagset_from_overview(Monitor *m) {
 	}
 }
 
-void toggle_overview(const Arg *arg) {
+static bool overview_client_on_current_tags(Client *c, bool only_current,
+											uint32_t current_tags) {
+	return !only_current || c->isglobal || (c->tags & current_tags);
+}
+
+/* Enter or leave overview mode on the selected monitor. */
+static void set_overview(const Arg *arg, bool enter) {
 	Client *c = NULL;
-	if (!server.selected_monitor || server.grab_client)
-		return;
-
 	Client *sel = arg->tc ? arg->tc : server.selected_monitor->sel;
-
-	server.selected_monitor->isoverview ^= 1;
 	uint32_t target = 0;
 	uint32_t visible_client_number = 0;
+	bool only_current = arg->i == 1;
+	uint32_t current_tags = 0;
 
-	if (!server.selected_monitor->isoverview) {
+	server.selected_monitor->isoverview = enter;
+
+	if (!enter) {
 		server.selected_monitor->ov_tab_layout = 0;
 		if (server.selected_monitor->is_jump_mode)
 			finish_jump_mode(server.selected_monitor);
 	}
 
-	if (server.selected_monitor->isoverview) {
-		wl_list_for_each(c, &server.clients,
-						 link) if (c && c->mon == server.selected_monitor &&
-								   !client_is_unmanaged(c) &&
-								   !client_is_x11_popup(c) && !c->isminimized &&
-								   !c->isunglobal && !(c->tags & TAG0_MASK)) {
-			visible_client_number++;
+	if (enter) {
+		current_tags =
+			server.selected_monitor->tagset[server.selected_monitor->seltags] &
+			TAGMASK;
+		wl_list_for_each(c, &server.clients, link) {
+			if (!c || c->mon != server.selected_monitor)
+				continue;
+			if (!client_is_unmanaged(c) && !client_is_x11_popup(c) &&
+				!c->isminimized && !c->isunglobal && !(c->tags & TAG0_MASK) &&
+				overview_client_on_current_tags(c, only_current, current_tags))
+				visible_client_number++;
 		}
 		if (visible_client_number > 0) {
 			server.selected_monitor->ovbk_current_tagset =
@@ -2121,14 +2104,13 @@ void toggle_overview(const Arg *arg) {
 			server.selected_monitor->ovbk_prev_tagset =
 				server.selected_monitor
 					->tagset[server.selected_monitor->seltags ^ 1];
-			target = ~0 & TAGMASK;
+			target = only_current ? current_tags : (~0 & TAGMASK);
 		} else {
-			server.selected_monitor->isoverview ^= 1;
+			server.selected_monitor->isoverview = false;
 			server.selected_monitor->ov_tab_layout = 0;
 			return;
 		}
-	} else if (!server.selected_monitor->isoverview && sel &&
-			   (sel->tags & TAGMASK) != 0) {
+	} else if (sel && (sel->tags & TAGMASK) != 0) {
 		target = get_tags_first_tag(sel->tags);
 	} else {
 		target =
@@ -2141,7 +2123,7 @@ void toggle_overview(const Arg *arg) {
 			target = 1;
 	}
 
-	if (server.selected_monitor->isoverview) {
+	if (enter) {
 		wlr_seat_pointer_clear_focus(server.seat);
 
 		if (server.cursor_hidden) {
@@ -2152,21 +2134,23 @@ void toggle_overview(const Arg *arg) {
 		}
 
 		wl_list_for_each(c, &server.clients, link) {
-			if (c && c->mon == server.selected_monitor &&
-				!client_is_unmanaged(c) && !client_is_x11_popup(c) &&
-				!c->isunglobal && !c->isminimized && !(c->tags & TAG0_MASK) &&
-				client_surface(c)->mapped) {
-				c->animation.overining = true;
-				if (!server.selected_monitor->is_jump_mode &&
-					!server.selected_monitor->ov_normal_mode)
-					/* Tab layout: skip view arrangement first; set it when the
-					 * unified rearrange runs after entering. */
-					c->animation.overview_enter_anim_set = true;
-				else
-					/* Other modes: set zoom during view arrangement. */
-					c->animation.overview_enter_anim_set = false;
-				overview_backup(c);
-			}
+			if (!c || c->mon != server.selected_monitor)
+				continue;
+			if (client_is_unmanaged(c) || client_is_x11_popup(c) ||
+				c->isunglobal || c->isminimized || (c->tags & TAG0_MASK) ||
+				!client_surface(c)->mapped ||
+				!overview_client_on_current_tags(c, only_current, current_tags))
+				continue;
+			c->animation.overining = true;
+			if (!server.selected_monitor->is_jump_mode &&
+				!server.selected_monitor->ov_normal_mode)
+				/* Tab layout: skip view arrangement first; set it when the
+				 * unified rearrange runs after entering. */
+				c->animation.overview_enter_anim_set = true;
+			else
+				/* Other modes: set zoom during view arrangement. */
+				c->animation.overview_enter_anim_set = false;
+			overview_backup(c);
 		}
 	} else {
 		server.selected_monitor->ov_normal_mode =
@@ -2187,8 +2171,7 @@ void toggle_overview(const Arg *arg) {
 	client_switch_view(&(Arg){.ui = target}, false);
 
 	/* Tab layout: rearrange after entering. */
-	if (server.selected_monitor->isoverview &&
-		!server.selected_monitor->is_jump_mode &&
+	if (enter && !server.selected_monitor->is_jump_mode &&
 		!server.selected_monitor->ov_normal_mode) {
 
 		Client *cc = NULL;
@@ -2204,11 +2187,34 @@ void toggle_overview(const Arg *arg) {
 	fix_mon_tagset_from_overview(server.selected_monitor);
 	refresh_monitors_workspaces_status(server.selected_monitor);
 
-	if (!server.selected_monitor->isoverview && sel && (sel->tags & target)) {
+	if (!enter && sel && (sel->tags & target)) {
 		client_focus(sel, 1);
 	}
 
 	return;
+}
+
+void toggle_overview(const Arg *arg) {
+	if (!server.selected_monitor || server.grab_client)
+		return;
+
+	set_overview(arg, !server.selected_monitor->isoverview);
+}
+
+void enter_overview(const Arg *arg) {
+	if (!server.selected_monitor || server.grab_client ||
+		server.selected_monitor->isoverview)
+		return;
+
+	set_overview(arg, true);
+}
+
+void leave_overview(const Arg *arg) {
+	if (!server.selected_monitor || server.grab_client ||
+		!server.selected_monitor->isoverview)
+		return;
+
+	set_overview(arg, false);
 }
 
 void toggle_jump(const Arg *arg) {
