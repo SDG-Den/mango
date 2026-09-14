@@ -54,6 +54,12 @@ void set_tagin_animation(Monitor *m, Client *c) {
 void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 	bool was_enabled = c->scene->node.enabled;
 
+	bool tag_switch_return = !was_enabled && c->scratchpad_tag_hidden &&
+							 want_animation && m->pertag->prevtag != 0 &&
+							 m->pertag->curtag != 0 &&
+							 client_animations_enabled(c);
+	c->scratchpad_tag_hidden = false;
+
 	if (!ISTILED(c) || (!c->is_clip_to_hide || !is_scroller_layout(c->mon))) {
 		c->is_clip_to_hide = false;
 		wlr_scene_node_set_enabled(&c->scene->node, true);
@@ -63,13 +69,38 @@ void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 			wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 	}
 
+	/* Scratchpad clients slide in from above the monitor when shown */
+	if (SCRATCHPAD_SHOWN(c) && (!was_enabled || c->animation.tagouting) &&
+		!tag_switch_return) {
+		c->animation.tag_from_rule = false;
+		c->animation.tagouted = false;
+		/* Reverse an in-flight hide instead of restarting from the top. */
+		bool reversing = c->animation.tagouting && c->animation.running;
+		c->animation.tagouting = false;
+		if (client_animations_enabled(c)) {
+			c->animation.tagining = true;
+			c->animainit_geom = c->geom;
+			if (reversing) {
+				c->animainit_geom.x = c->animation.current.x;
+				c->animainit_geom.y = c->animation.current.y;
+			} else {
+				c->animainit_geom.y = c->mon->m.y - c->geom.height;
+			}
+		} else {
+			c->animation.tagining = false;
+			c->animainit_geom.x = c->animation.current.x;
+			c->animainit_geom.y = c->animation.current.y;
+		}
+		resize_apply(c, c->geom, (ResizeOpts){.skip_ov_enter_anim = true});
+		return;
+	}
+
 	/* Special workspace clients slide in from above the monitor */
 	if (c->tags & TAG0_MASK) {
 		c->animation.tag_from_rule = false;
 		c->animation.tagouting = false;
 		c->animation.tagouted = false;
-		client_raise_group(c);
-		if (want_animation && config.animations) {
+		if (want_animation && client_animations_enabled(c)) {
 			c->animation.tagining = true;
 			c->animainit_geom = c->geom;
 			c->animainit_geom.y = c->mon->m.y - c->geom.height;
@@ -83,7 +114,7 @@ void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 
 	if (!was_enabled && !c->animation.tag_from_rule && want_animation &&
 		m->pertag->prevtag != 0 && m->pertag->curtag != 0 &&
-		config.animations) {
+		client_animations_enabled(c)) {
 		c->animation.tagining = true;
 		set_tagin_animation(m, c);
 	} else {
@@ -146,16 +177,15 @@ void set_arrange_hidden(Monitor *m, Client *c, bool want_animation) {
 		return;
 	}
 
-	/* Special workspace windows should animate out or hide when special
-	 * workspace is not active */
-	if (c->tags & TAG0_MASK) {
-		if (want_animation && config.animations && !c->animation.tagouted &&
+	/* Scratchpad windows slide up and out when hidden */
+	if (!(c->tags & TAG0_MASK) && c->is_in_scratchpad && c->isminimized) {
+		c->scratchpad_tag_hidden = false;
+		if (client_animations_enabled(c) && !c->animation.tagouted &&
 			c->scene->node.enabled) {
 			c->animation.tagouting = true;
 			c->animation.tagining = false;
 			c->pending = c->geom;
 			c->pending.y = c->mon->m.y - c->geom.height;
-			client_raise_group(c);
 			resize(c, c->geom, 0);
 		} else {
 			c->animation.running = false;
@@ -168,9 +198,34 @@ void set_arrange_hidden(Monitor *m, Client *c, bool want_animation) {
 		return;
 	}
 
+	/* Special workspace windows should animate out or hide when special
+	 * workspace is not active */
+	if (c->tags & TAG0_MASK) {
+		if (want_animation && client_animations_enabled(c) &&
+			!c->animation.tagouted && c->scene->node.enabled) {
+			c->animation.tagouting = true;
+			c->animation.tagining = false;
+			c->pending = c->geom;
+			c->pending.y = c->mon->m.y - c->geom.height;
+			resize(c, c->geom, 0);
+		} else {
+			c->animation.running = false;
+			c->animation.tagouting = false;
+			c->animation.tagining = false;
+			wlr_scene_node_set_enabled(&c->scene->node, false);
+			c->animainit_geom = c->current = c->pending = c->animation.current =
+				c->geom;
+		}
+		return;
+	}
+
+	if (!(c->tags & TAG0_MASK) && SCRATCHPAD_SHOWN(c)) {
+		c->scratchpad_tag_hidden = true;
+	}
+
 	if ((c->tags & (1 << (m->pertag->prevtag - 1))) &&
 		m->pertag->prevtag != 0 && m->pertag->curtag != 0 &&
-		config.animations) {
+		client_animations_enabled(c)) {
 		c->animation.tagouting = true;
 		c->animation.tagining = false;
 		set_tagout_animation(m, c);

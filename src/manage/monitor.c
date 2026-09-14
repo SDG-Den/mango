@@ -301,6 +301,19 @@ bool match_monitor_spec(char *spec, Monitor *m) {
 	return match;
 }
 
+Monitor *device_target_monitor(struct wlr_input_device *device) {
+	ConfigDeviceRule *rule = find_device_rule(device);
+	if (rule && rule->monitor[0]) {
+		Monitor *m = NULL;
+		wl_list_for_each(m, &server.monitors, link) {
+			if (match_monitor_spec(rule->monitor, m))
+				return m;
+		}
+	}
+
+	return server.selected_monitor;
+}
+
 bool mango_scene_output_commit(struct wlr_scene_output *scene_output,
 							   struct wlr_output_state *state) {
 	struct wlr_output *wlr_output = scene_output->output;
@@ -550,6 +563,11 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 	int32_t ji;
 	Monitor *m = NULL;
 	bool custom_monitor_mode = false;
+
+	if (server.pending_headless_output_name != NULL &&
+		wlr_output_is_headless(wlr_output)) {
+		wlr_output_set_name(wlr_output, server.pending_headless_output_name);
+	}
 
 	if (!wlr_output_init_render(wlr_output, server.allocator, server.renderer))
 		return;
@@ -857,6 +875,11 @@ void monitor_close(Monitor *m) {
 	Client *c = NULL;
 	int32_t i = 0, nmons = wl_list_length(&server.monitors);
 
+	if (server.gesture_drive_mon == m) {
+		server.gesture_drive_active = false;
+		server.gesture_drive_mon = NULL;
+	}
+
 	if (m->isoverview) {
 		toggle_overview(&(Arg){0});
 	}
@@ -999,7 +1022,7 @@ void handle_output_layout_change(struct wl_listener *listener, void *data) {
 	wlr_scene_rect_set_size(server.root_bg, server.scene_geometry.width,
 							server.scene_geometry.height);
 
-	/* Make sure the clients are hidden when dwl is locked */
+	/* Make sure the clients are hidden when mango is locked */
 	wlr_scene_node_set_position(&server.locked_bg->node,
 								server.scene_geometry.x,
 								server.scene_geometry.y);
@@ -1123,9 +1146,8 @@ void handle_output_manager_apply(struct wl_listener *listener, void *data) {
 	output_manager_apply_or_test(config, 0);
 }
 
-void // 0.7 custom
-output_manager_apply_or_test(struct wlr_output_configuration_v1 *config,
-							 int32_t test) {
+void output_manager_apply_or_test(struct wlr_output_configuration_v1 *config,
+								  int32_t test) {
 	/*
 	 * Called when a client such as wlr-randr requests a change in output
 	 * configuration. This is only one way that the layout can be changed,
@@ -1187,7 +1209,6 @@ output_manager_apply_or_test(struct wlr_output_configuration_v1 *config,
 		wlr_output_configuration_v1_send_failed(config);
 	wlr_output_configuration_v1_destroy(config);
 
-	/* https://codeberg.org/dwl/dwl/issues/577 */
 	handle_output_layout_change(NULL, NULL);
 }
 
@@ -1380,8 +1401,8 @@ void handle_renderer_lost(struct wl_listener *listener, void *data) {
 
 	mango_error(true, WLR_DEBUG, "gpu reset");
 
-	server.recreate_renderer_source = wl_event_loop_add_idle(
-		server.event_loop, do_renderer_recreate, NULL);
+	server.recreate_renderer_source =
+		wl_event_loop_add_idle(server.event_loop, do_renderer_recreate, NULL);
 }
 
 void setgaps(int32_t oh, int32_t ov, int32_t ih, int32_t iv) {

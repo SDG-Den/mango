@@ -18,11 +18,14 @@ enum {
 	LyrBottom,
 	LyrTile,
 	LyrMaximize,
+	LyrFloat,
 	LyrTop,
+	LyrFullscreen,
 	LyrSpecialDim,
 	LyrSpecialTile,
 	LyrSpecialMaximize,
-	LyrSpecialTop,
+	LyrSpecialFloat,
+	LyrSpecialFullscreen,
 	LyrFadeOut,
 	LyrOverlay,
 	LyrIMPopup,
@@ -41,6 +44,7 @@ struct MangoServer {
 	struct wl_event_loop *event_loop;
 	struct wlr_backend *backend;
 	struct wlr_backend *headless_backend;
+	const char *pending_headless_output_name;
 	struct wlr_scene *scene;
 	struct wlr_scene_tree *layers[NUM_LAYERS];
 	struct wlr_renderer *renderer;
@@ -141,6 +145,9 @@ struct MangoServer {
 	int32_t axis_apply_time;
 	int32_t axis_apply_dir;
 	int32_t scroller_focus_lock;
+
+	struct Monitor *gesture_drive_mon;
+	bool gesture_drive_active;
 
 	uint32_t swipe_fingers;
 	double swipe_dx;

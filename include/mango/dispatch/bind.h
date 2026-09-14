@@ -20,6 +20,12 @@ typedef struct Arg {
 
 enum { PREV, NEXT };
 enum { FORCE, UNFORCE };
+enum {
+	OVERCIRCLE_PREV = PREV,
+	OVERCIRCLE_NEXT = NEXT,
+	OVERCIRCLE_CURRENT_PREV,
+	OVERCIRCLE_CURRENT_NEXT,
+};
 
 void minimize_window(const Arg *arg);
 void restore_minimized(const Arg *arg);
@@ -29,6 +35,8 @@ void focus_window_or_workspace(const Arg *arg);
 void group_join(const Arg *arg);
 void group_leave(const Arg *arg);
 void toggle_overview(const Arg *arg);
+void enter_overview(const Arg *arg);
+void leave_overview(const Arg *arg);
 void switcher(const Arg *arg);
 void toggle_hdr(const Arg *arg);
 void toggle_jump(const Arg *arg);
@@ -44,6 +52,8 @@ void view_to_right(const Arg *arg);
 void view_insert(const Arg *arg);
 void view_to_left_have_client(const Arg *arg);
 void view_to_right_have_client(const Arg *arg);
+void viewprev_have_client(const Arg *arg);
+void viewnext_have_client(const Arg *arg);
 void view_cross_monitor(const Arg *arg);
 void toggle_floating(const Arg *arg);
 void toggle_fullscreen(const Arg *arg);
@@ -61,6 +71,7 @@ void set_master_factor(const Arg *arg);
 void quit(const Arg *arg);
 void move_resize(const Arg *arg);
 void exchange_client(const Arg *arg);
+void move_client(const Arg *arg);
 void exchange_stack_client(const Arg *arg);
 void kill_client(const Arg *arg);
 void toggle_global(const Arg *arg);

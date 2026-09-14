@@ -1,5 +1,5 @@
 project('mango', ['c'],
-  version : '0.16.3',
+  version : '0.17.0',
 )
 
 subdir('protocols')
@@ -177,6 +177,13 @@ portal_install_dir = join_paths(prefix, 'share/xdg-desktop-portal')
 install_data('assets/mango.desktop', install_dir : desktop_install_dir)
 install_data('assets/mango-portals.conf', install_dir : portal_install_dir)
 install_data('assets/config.conf', install_dir : join_paths(sysconfdir, 'mango'))
+
+# Ship mango-session.target so that systemd user services declaring
+# WantedBy=graphical-session.target (portals, panels, ...) are started together
+# with the session. mango activates the target itself, see
+# set_activation_env() in src/main.c
+install_data('assets/mango-session.target',
+  install_dir : join_paths(prefix, 'lib/systemd/user'))
 
 # generate the mmsg man page at build time so the version always
 # matches the project version

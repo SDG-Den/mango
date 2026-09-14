@@ -604,7 +604,7 @@ void handle_request_set_primary_selection(struct wl_listener *listener,
 										  void *data) {
 	/* This event is raised by the seat when a client wants to set the
 	 * selection, usually when the user copies something. wlroots allows
-	 * compositors to ignore such requests if they so choose, but in dwl we
+	 * compositors to ignore such requests if they so choose, but in mango we
 	 * always honor
 	 */
 	struct wlr_seat_request_set_primary_selection_event *event = data;
@@ -614,15 +614,30 @@ void handle_request_set_primary_selection(struct wl_listener *listener,
 void handle_request_set_selection(struct wl_listener *listener, void *data) {
 	/* This event is raised by the seat when a client wants to set the
 	 * selection, usually when the user copies something. wlroots allows
-	 * compositors to ignore such requests if they so choose, but in dwl we
+	 * compositors to ignore such requests if they so choose, but in mango we
 	 * always honor
 	 */
 	struct wlr_seat_request_set_selection_event *event = data;
 	wlr_seat_set_selection(server.seat, event->source, event->serial);
 }
 
+static bool client_keep_idle_inhibit(Client *c) {
+	if (!c || !c->mon)
+		return false;
+
+	if (c->idleinhibit_when_focus)
+		return true;
+
+	if (config.idleinhibit_when_fullscreen && c->isfullscreen &&
+		VISIBLEON(c, c->mon)) {
+		return true;
+	}
+
+	return false;
+}
+
 void check_keep_idle_inhibit(Client *c) {
-	if (c && c->idleinhibit_when_focus && server.keep_idle_inhibit_source) {
+	if (server.keep_idle_inhibit_source && client_keep_idle_inhibit(c)) {
 		wl_event_source_timer_update(server.keep_idle_inhibit_source, 1000);
 	}
 }
@@ -638,8 +653,8 @@ int32_t idle_keep_inhibit(void *data) {
 		return 1;
 	}
 
-	if (!server.selected_monitor || !server.selected_monitor->sel ||
-		!server.selected_monitor->sel->idleinhibit_when_focus) {
+	if (!server.selected_monitor ||
+		!client_keep_idle_inhibit(server.selected_monitor->sel)) {
 		wl_event_source_timer_update(server.keep_idle_inhibit_source, 0);
 		return 1;
 	}
