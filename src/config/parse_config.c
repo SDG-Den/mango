@@ -283,6 +283,25 @@ int32_t parse_direction(const char *str) {
 	}
 }
 
+int32_t parse_monitor_arg(const char *str) {
+	int32_t dir = parse_direction(str);
+
+	char lowerStr[10];
+	int32_t i = 0;
+	while (str[i] && i < 9) {
+		lowerStr[i] = tolower(str[i]);
+		i++;
+	}
+	lowerStr[i] = '\0';
+
+	if (strcmp(lowerStr, "next") == 0) {
+		return MON_NEXT;
+	} else if (strcmp(lowerStr, "prev") == 0) {
+		return MON_PREV;
+	}
+	return dir;
+}
+
 int64_t parse_color(const char *hex_str) {
 	char *endptr;
 	int64_t hex_num = strtol(hex_str, &endptr, 16);
@@ -1546,7 +1565,6 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		rule->vrr_only_fullscreen = -1;
 		rule->force_render = -1;
 		rule->activation_bypass = -1;
-		rule->confine_pointer = -1;
 		rule->isterm = -1;
 		rule->allow_csd = -1;
 		rule->force_fakemaximize = -1;
@@ -1682,8 +1700,6 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->noswallow = atoi(val);
 				} else if (strcmp(key, "noblur") == 0) {
 					rule->noblur = atoi(val);
-				} else if (strcmp(key, "confine_pointer") == 0) {
-					rule->confine_pointer = atoi(val);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
@@ -4805,13 +4821,13 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		func = toggle_render_border;
 	} else if (strcmp(func_name, "focusmon") == 0) {
 		func = focus_monitor;
-		(*arg).i = parse_direction(arg_value);
+		(*arg).i = parse_monitor_arg(arg_value);
 		if ((*arg).i == UNDIR) {
 			(*arg).v = strdup(arg_value);
 		}
 	} else if (strcmp(func_name, "tagmon") == 0) {
 		func = tag_monitor;
-		(*arg).i = parse_direction(arg_value);
+		(*arg).i = parse_monitor_arg(arg_value);
 		(*arg).i2 = atoi(arg_value2);
 		if ((*arg).i == UNDIR) {
 			(*arg).v = strdup(arg_value);

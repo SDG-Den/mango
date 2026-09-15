@@ -102,9 +102,54 @@ pointer_constraint_hint_position(struct wlr_pointer_constraint_v1 *constraint,
 
 	struct wlr_box box = pointer_client_warp_box(c);
 	double scale = pointer_surface_scale(c);
-	*lx = box.x + c->bw + constraint->current.cursor_hint.x / scale;
-	*ly = box.y + c->bw + constraint->current.cursor_hint.y / scale;
+	double x = box.x + c->bw + constraint->current.cursor_hint.x / scale;
+	double y = box.y + c->bw + constraint->current.cursor_hint.y / scale;
+	if (!wlr_box_contains_point(&c->geom, x, y)) {
+		return false;
+	}
+	if (c->mon) {
+		wlr_box_closest_point(&c->mon->m, x, y, &x, &y);
+	}
+	*lx = x;
+	*ly = y;
 	return true;
+}
+
+static bool pointer_locked_constraint_applies(
+	Client *c, struct wlr_pointer_constraint_v1 *constraint) {
+	if (!c || pixman_region32_empty(&constraint->region)) {
+		return true;
+	}
+
+	double scale = pointer_surface_scale(c);
+	struct wlr_box box = pointer_client_warp_box(c);
+	double sx = (server.cursor->x - box.x - c->bw) * scale;
+	double sy = (server.cursor->y - box.y - c->bw) * scale;
+	return pixman_region32_contains_point(&constraint->region, floor(sx),
+										  floor(sy), NULL);
+}
+
+static bool pointer_locked_applied = false;
+
+static bool pointer_hint_applied = false;
+static double pointer_hint_x = 0, pointer_hint_y = 0;
+
+static void
+pointer_follow_constraint_hint(struct wlr_pointer_constraint_v1 *constraint,
+							   Client *c) {
+	double lx, ly;
+	if (!pointer_constraint_hint_position(constraint, c, &lx, &ly)) {
+		return;
+	}
+	if (pointer_hint_applied && pointer_hint_x == lx && pointer_hint_y == ly) {
+		return;
+	}
+	pointer_hint_applied = true;
+	pointer_hint_x = lx;
+	pointer_hint_y = ly;
+	wlr_cursor_warp(server.cursor, NULL, lx, ly);
+	wlr_seat_pointer_warp(constraint->seat, constraint->current.cursor_hint.x,
+						  constraint->current.cursor_hint.y);
 }
 
 static bool pointer_cursor_outside_client(Client *c) {
@@ -126,46 +171,6 @@ static bool pointer_node_enabled(struct wlr_scene_node *node) {
 static bool pointer_client_visible(Client *c) {
 	return c && c->mon && !c->mon->isoverview && client_surface(c)->mapped &&
 		   VISIBLEON(c, c->mon);
-}
-
-static Client *confine_pointer_last = NULL;
-
-#define CONFINE_POINTER_MARGIN 5
-
-static Client *pointer_confine_rule_client(void) {
-	Client *c = NULL;
-
-	if (server.seat->keyboard_state.focused_surface) {
-		toplevel_from_wlr_surface(server.seat->keyboard_state.focused_surface,
-								  &c, NULL);
-	}
-	if (!c && server.selected_monitor) {
-		c = server.selected_monitor->sel;
-	}
-
-	if (!c || !c->confine_pointer || !client_surface(c)->mapped || !c->mon ||
-		c->mon->isoverview || c->isminimized || !VISIBLEON(c, c->mon) ||
-		!pointer_node_enabled(&c->scene->node)) {
-		return NULL;
-	}
-	return c;
-}
-
-void pointer_check_confine_client(void) {
-	Client *c = pointer_confine_rule_client();
-
-	if (c && c != confine_pointer_last && pointer_cursor_outside_client(c)) {
-		struct wlr_box box = pointer_client_warp_box(c);
-		wlr_cursor_warp(server.cursor, NULL, box.x + box.width / 2.0,
-						box.y + box.height / 2.0);
-	}
-	confine_pointer_last = c;
-}
-
-void pointer_client_destroyed(Client *c) {
-	if (confine_pointer_last == c) {
-		confine_pointer_last = NULL;
-	}
 }
 
 static bool pointer_constraint_surface_visible(
@@ -607,6 +612,9 @@ void handle_pointer_constraint_commit(struct wl_listener *listener,
 	pointer_constraint_sync_region(constraint);
 	toplevel_from_wlr_surface(constraint->surface, &c, NULL);
 	pointer_warp_into_constraint(constraint, c);
+	if (constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+		pointer_follow_constraint_hint(constraint, c);
+	}
 }
 
 void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
@@ -642,6 +650,9 @@ void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
 void pointer_constrain_cursor(struct wlr_pointer_constraint_v1 *constraint) {
 	if (server.active_constraint == constraint)
 		return;
+
+	pointer_locked_applied = false;
+	pointer_hint_applied = false;
 
 	Client *old_client = NULL, *new_client = NULL;
 	if (server.active_constraint) {
@@ -716,6 +727,8 @@ void handle_pointer_constraint_destroy(struct wl_listener *listener,
 	if (server.active_constraint == pointer_constraint->constraint) {
 		pointer_warp_to_constraint_hint();
 		server.active_constraint = NULL;
+		pointer_locked_applied = false;
+		pointer_hint_applied = false;
 	}
 
 	wl_list_remove(&pointer_constraint->destroy.link);
@@ -881,7 +894,7 @@ void pointer_end_grab_client(bool follow_pointer) {
 										gc->geom.y + gc->geom.height / 2);
 	if (!target_mon)
 		target_mon = gc->mon;
-	server.selected_monitor = target_mon;
+	set_selected_monitor(target_mon);
 	client_update_oldmonname_record(gc, server.selected_monitor);
 	client_set_monitor(gc, server.selected_monitor, 0, true);
 	/* if the view changed mid-drag, drop onto the current tag
@@ -936,14 +949,16 @@ void pointer_process_motion(uint32_t time, struct wlr_input_device *device,
 				(constraint ||
 				 active->surface ==
 					 server.seat->pointer_state.focused_surface)) {
-				double lx, ly;
-
-				if (cc &&
-					pointer_constraint_hint_position(active, cc, &lx, &ly) &&
-					pointer_cursor_outside_client(cc)) {
-					wlr_cursor_warp(server.cursor, NULL, lx, ly);
+				if (pointer_locked_constraint_applies(cc, active)) {
+					pointer_follow_constraint_hint(active, cc);
+					pointer_locked_applied = true;
+					return;
 				}
-				return;
+
+				if (pointer_locked_applied) {
+					pointer_locked_applied = false;
+					pointer_warp_to_constraint_hint();
+				}
 			}
 
 			if (cc) {
@@ -962,28 +977,6 @@ void pointer_process_motion(uint32_t time, struct wlr_input_device *device,
 					dy = 0;
 				}
 			}
-		}
-
-		Client *rule_client = pointer_confine_rule_client();
-		if (!server.active_constraint && rule_client) {
-			struct wlr_box box = pointer_client_warp_box(rule_client);
-			double min_x = box.x + rule_client->bw + CONFINE_POINTER_MARGIN;
-			double min_y = box.y + rule_client->bw + CONFINE_POINTER_MARGIN;
-			double max_x = box.x + box.width - rule_client->bw -
-						   CONFINE_POINTER_MARGIN - 1;
-			double max_y = box.y + box.height - rule_client->bw -
-						   CONFINE_POINTER_MARGIN - 1;
-
-			if (max_x < min_x) {
-				max_x = min_x;
-			}
-			if (max_y < min_y) {
-				max_y = min_y;
-			}
-			dx = MANGO_MIN(MANGO_MAX(server.cursor->x + dx, min_x), max_x) -
-				 server.cursor->x;
-			dy = MANGO_MIN(MANGO_MAX(server.cursor->y + dy, min_y), max_y) -
-				 server.cursor->y;
 		}
 
 		wlr_cursor_move(server.cursor, device, dx, dy);

@@ -21,6 +21,7 @@
 #include "mango/manage/client.h"
 #include "mango/manage/layer.h"
 #include "mango/manage/misc.h"
+#include "mango/manage/xwayland_primary.h"
 #include <fcntl.h>
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <scenefx/types/wlr_scene.h>
@@ -100,6 +101,24 @@ Monitor *monitor_from_direction(enum wlr_direction dir) {
 			 server.selected_monitor->m.y)))
 		return next->data;
 	return server.selected_monitor;
+}
+
+Monitor *monitor_from_cycle(int32_t dir) {
+	if (!server.selected_monitor)
+		return NULL;
+
+	Monitor *m = server.selected_monitor;
+	int32_t nmons = wl_list_length(&server.monitors);
+
+	for (int32_t i = 0; i < nmons; i++) {
+		if (dir == MON_NEXT)
+			m = wl_container_of(m->link.next, m, link);
+		else
+			m = wl_container_of(m->link.prev, m, link);
+		if (m != server.selected_monitor && m->wlr_output->enabled)
+			return m;
+	}
+	return NULL;
 }
 
 bool is_scroller_layout(Monitor *m) {
@@ -864,6 +883,14 @@ void handle_output_destroy(struct wl_listener *listener, void *data) {
 	free(m);
 }
 
+void set_selected_monitor(Monitor *m) {
+	server.selected_monitor = m;
+#ifdef XWAYLAND
+	/* Keep the X11 primary output on the current monitor. */
+	xwayland_primary_set(m);
+#endif
+}
+
 void monitor_close(Monitor *m) {
 	/* update selected_monitor if needed and
 	 * move closed monitor's clients to the focused one */
@@ -880,15 +907,13 @@ void monitor_close(Monitor *m) {
 	}
 
 	if (!nmons) {
-		server.selected_monitor = NULL;
+		set_selected_monitor(NULL);
 	} else if (m == server.selected_monitor) {
+		Monitor *next;
 		do /* don't switch to disabled monitors */
-			server.selected_monitor = wl_container_of(
-				server.monitors.next, server.selected_monitor, link);
-		while (!server.selected_monitor->wlr_output->enabled && i++ < nmons);
-
-		if (!server.selected_monitor->wlr_output->enabled)
-			server.selected_monitor = NULL;
+			next = wl_container_of(server.monitors.next, next, link);
+		while (!next->wlr_output->enabled && i++ < nmons);
+		set_selected_monitor(next->wlr_output->enabled ? next : NULL);
 	}
 
 	wl_list_for_each(c, &server.clients, link) {
@@ -1097,7 +1122,7 @@ void handle_output_layout_change(struct wl_listener *listener, void *data) {
 		config_head->state.y = m->m.y;
 
 		if (!server.selected_monitor)
-			server.selected_monitor = m;
+			set_selected_monitor(m);
 	}
 
 	if (server.selected_monitor &&
