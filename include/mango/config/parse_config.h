@@ -147,7 +147,6 @@ typedef struct {
 	int32_t force_tearing;
 	int32_t noswallow;
 	int32_t noblur;
-	int32_t confine_pointer;
 	float focused_opacity;
 	float unfocused_opacity;
 	float scroller_proportion_single;
@@ -600,6 +599,8 @@ void parse_bind_flags(const char *str, KeyBinding *kb);
 int32_t parse_circle_direction(const char *str);
 
 int32_t parse_direction(const char *str);
+
+int32_t parse_monitor_arg(const char *str);
 
 int32_t parse_force(const char *str);
 

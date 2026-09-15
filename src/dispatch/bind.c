@@ -21,6 +21,7 @@
 #include "mango/manage/monitor.h"
 #include "mango/overview/overview.h"
 #include <fcntl.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -205,6 +206,8 @@ void move_client(const Arg *arg) {
 
 	if (!tc) {
 		client_jump_to_monitor(c, monitor_from_direction(arg->i), arg->i);
+	} else if (tc->mon != c->mon) {
+		client_move_to_monitor(c, tc, arg->i);
 	} else if (tc->mon->pertag->ltidxs[get_mon_curtag(tc->mon)]->id ==
 			   DWINDLE) {
 		dwindle_move_next_to(c, tc, config.dwindle_split_ratio, arg->i);
@@ -444,7 +447,9 @@ void focus_monitor(const Arg *arg) {
 	Monitor *m = NULL;
 	Monitor *tm = NULL;
 
-	if (arg->i != UNDIR) {
+	if (arg->i == MON_NEXT || arg->i == MON_PREV) {
+		tm = monitor_from_cycle(arg->i);
+	} else if (arg->i != UNDIR) {
 		tm = monitor_from_direction(arg->i);
 	} else if (arg->v) {
 		wl_list_for_each(m, &server.monitors, link) {
@@ -463,7 +468,7 @@ void focus_monitor(const Arg *arg) {
 	if (!tm || !tm->wlr_output->enabled || tm == server.selected_monitor)
 		return;
 
-	server.selected_monitor = tm;
+	set_selected_monitor(tm);
 	if (config.warpcursor) {
 		pointer_warp_to_monitor(server.selected_monitor);
 	}
@@ -1238,15 +1243,8 @@ void center_window(const Arg *arg) {
 }
 
 static void close_inherited_fds(void) {
-#ifdef SYS_close_range
 	extern long syscall(long number, ...);
-	if (syscall(SYS_close_range, 3, ~0U, 0) == 0)
-		return;
-#endif
-	int fd_max = sysconf(_SC_OPEN_MAX);
-	for (int i = 3; i < fd_max; i++) {
-		close(i);
-	}
+	syscall(SYS_close_range, 3, ~0U, 0);
 }
 
 void spawn_shell(const Arg *arg) {
@@ -1468,7 +1466,9 @@ void tag_monitor(const Arg *arg) {
 
 	oldmon = c->mon;
 
-	if (arg->i != UNDIR) {
+	if (arg->i == MON_NEXT || arg->i == MON_PREV) {
+		m = monitor_from_cycle(arg->i);
+	} else if (arg->i != UNDIR) {
 		m = monitor_from_direction(arg->i);
 	} else if (arg->v) {
 		wl_list_for_each(cm, &server.monitors, link) {
@@ -1508,7 +1508,7 @@ void tag_monitor(const Arg *arg) {
 		(int32_t)(c->float_geom.width * c->mon->w.width / oldmon->w.width);
 	c->float_geom.height =
 		(int32_t)(c->float_geom.height * c->mon->w.height / oldmon->w.height);
-	server.selected_monitor = c->mon;
+	set_selected_monitor(c->mon);
 	c->float_geom = client_center_geometry(c, c->mon, c->float_geom, 0, 0);
 
 	if (c->isfloating) {
@@ -1518,7 +1518,7 @@ void tag_monitor(const Arg *arg) {
 		client_focus(c, 1);
 		resize(c, c->geom, 1);
 	} else {
-		server.selected_monitor = c->mon;
+		set_selected_monitor(c->mon);
 		target = get_tags_first_tag(c->tags);
 		client_switch_view(&(Arg){.ui = target}, true);
 		client_focus(c, 1);
@@ -1673,7 +1673,7 @@ void toggle_special_tag_mon(Monitor *m) {
 	if (!m || m->isoverview)
 		return;
 
-	server.selected_monitor = m;
+	set_selected_monitor(m);
 	if (is_special_active(m)) {
 		/* Toggle back to previous tagset (supports multi-tag views) */
 		uint32_t prev_set = m->tagset[m->seltags ^ 1] & TAGMASK;

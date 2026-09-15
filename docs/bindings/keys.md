@@ -125,7 +125,7 @@ bindr=Super,Super_L,spawn,rofi -show run
 | `switcher` | `next/prev`, `all_tag_next/all_tag_prev`, `all_next/all_prev` | Open or cycle the thumbnail switcher. `next`/`prev` list the current tag's windows, `all_tag_next`/`all_tag_prev` list all tags on the current monitor, `all_next`/`all_prev` list all monitors and tags. Releasing any modifier key selects. |
 | `exchange_client` | `left/right/up/down` | Swap the focused window with its neighbor in direction. Both windows change place, and with `exchange_cross_monitor` enabled they also swap monitors. |
 | `exchange_stack_client` | `next/prev` | Exchange window position in stack. |
-| `move_client` | `left/right/up/down` | Move the focused window one step in direction: `dwindle` re-inserts it next to the neighbor keeping the row/column it came from, every other layout swaps it with the neighbor like `exchange_client`. Without a neighbor in that direction the window moves onto the monitor lying there, which needs `exchange_cross_monitor`. |
+| `move_client` | `left/right/up/down` | Move the focused window one step in direction. On the same monitor `dwindle` re-inserts it next to the neighbor keeping the row/column it came from, every other layout swaps it with the neighbor like `exchange_client`. When the neighbor lies on another monitor the window moves onto that monitor and is inserted in front of or behind the neighbor on the side it comes from; without a neighbor in that direction it moves onto the monitor lying there. Crossing monitors needs `exchange_cross_monitor`. |
 | `zoom` | - | Swap focused window with Master. |
 
 ### Group
@@ -168,8 +168,8 @@ bindr=Super,Super_L,spawn,rofi -show run
 | `toggletag` | `mask` | Toggle tag(s) on window. Accepts a [tag mask](/docs/bindings/keys#tag-mask-format). `0` toggles all tags. |
 | `toggleview` | `mask` | Toggle view of tag(s). Accepts a [tag mask](/docs/bindings/keys#tag-mask-format). |
 | `comboview` | `mask` | View multiple tags simultaneously. Accepts a [tag mask](/docs/bindings/keys#tag-mask-format) (typically built by pressing keys, e.g., `1|3`). |
-| `focusmon` | `left/right/up/down/monitor_spec` | Focus monitor by direction or [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
-| `tagmon` | `left/right/up/down/monitor_spec,[keeptag]` | Move window to monitor by direction or [monitor spec](/docs/configuration/monitors#monitor-spec-format). `keeptag` is 0 or 1. |
+| `focusmon` | `left/right/up/down/next/prev/monitor_spec` | Focus monitor by direction, by cycling to the next or previous monitor (`next`/`prev`), or by [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
+| `tagmon` | `left/right/up/down/next/prev/monitor_spec,[keeptag]` | Move window to monitor by direction, by cycling to the next or previous monitor (`next`/`prev`), or by [monitor spec](/docs/configuration/monitors#monitor-spec-format). `keeptag` is 0 or 1. |
 
 #### Tag Mask Format
 

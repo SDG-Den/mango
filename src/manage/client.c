@@ -15,6 +15,7 @@
 #include "mango/manage/layer.h"
 #include "mango/manage/misc.h"
 #include "mango/manage/monitor.h"
+#include "mango/manage/xwayland_primary.h"
 #include "mango/overview/overview.h"
 #include "mango/switcher/switcher.h"
 #include <fcntl.h>
@@ -184,6 +185,7 @@ void client_get_clip(Client *c, struct wlr_box *clip) {
 	clip->x = c->surface.xdg->geometry.x;
 	clip->y = c->surface.xdg->geometry.y;
 }
+
 void client_get_geometry(Client *c, struct wlr_box *geom) {
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
@@ -1388,7 +1390,6 @@ void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, activation_bypass);
 	APPLY_INT_PROP(c, r, isunglobal);
 	APPLY_INT_PROP(c, r, noblur);
-	APPLY_INT_PROP(c, r, confine_pointer);
 	APPLY_INT_PROP(c, r, allow_shortcuts_inhibit);
 
 	APPLY_FLOAT_PROP(c, r, scroller_proportion);
@@ -2549,7 +2550,6 @@ void handle_client_destroy(struct wl_listener *listener, void *data) {
 		wlr_scene_node_destroy(&c->active_texture->node);
 	if (c->inactive_texture)
 		wlr_scene_node_destroy(&c->inactive_texture->node);
-	pointer_client_destroyed(c);
 	free(c);
 }
 
@@ -2746,7 +2746,7 @@ void client_focus(Client *c, int32_t lift) {
 
 		last_focus_client =
 			server.selected_monitor ? server.selected_monitor->sel : NULL;
-		server.selected_monitor = c->mon;
+		set_selected_monitor(c->mon);
 		server.selected_monitor->prevsel = server.selected_monitor->sel;
 		server.selected_monitor->sel = c;
 		c->isfocusing = true;
@@ -2854,7 +2854,6 @@ void client_focus(Client *c, int32_t lift) {
 		if (server.active_constraint) {
 			pointer_constrain_cursor(NULL);
 		}
-		pointer_check_confine_client();
 		return;
 	}
 
@@ -2878,8 +2877,6 @@ void client_focus(Client *c, int32_t lift) {
 	}
 
 	client_ensure_constraint(c);
-
-	pointer_check_confine_client();
 }
 
 void client_active(Client *c) {
@@ -3778,6 +3775,24 @@ static int32_t monitor_move_direction(const Monitor *from, const Monitor *to) {
 	return dy > 0 ? DOWN : UP;
 }
 
+static void client_reassign_monitor(Client *c, Monitor *m) {
+	Monitor *old_mon = c->mon;
+
+	if (!old_mon || !m || old_mon == m)
+		return;
+
+	if (old_mon->sel == c)
+		old_mon->sel = NULL;
+	if (old_mon->prevsel == c)
+		old_mon->prevsel = NULL;
+
+	c->mon = m;
+	if (!VISIBLEON(c, m))
+		client_reset_mon_tags(c, m, 0);
+	m->sel = c;
+	set_selected_monitor(m);
+}
+
 bool client_jump_to_monitor(Client *c, Monitor *m, int32_t dir) {
 	if (!c || !c->mon || !m || c->mon == m)
 		return false;
@@ -3786,15 +3801,56 @@ bool client_jump_to_monitor(Client *c, Monitor *m, int32_t dir) {
 		return false;
 
 	Monitor *old_mon = c->mon;
-	c->mon = m;
-	if (old_mon->sel == c)
-		old_mon->sel = NULL;
-	m->sel = c;
-	server.selected_monitor = m;
+	client_reassign_monitor(c, m);
 
 	arrange(old_mon, false, false);
 	arrange(m, false, false);
 	return true;
+}
+
+void client_move_to_monitor(Client *c, Client *target, int32_t dir) {
+	if (!c || !c->mon || !target || !target->mon || c == target)
+		return;
+
+	Monitor *src_mon = c->mon;
+	Monitor *dst_mon = target->mon;
+
+	if (src_mon == dst_mon || !config.exchange_cross_monitor ||
+		monitor_move_direction(src_mon, dst_mon) != dir)
+		return;
+
+	const Layout *layout = dst_mon->pertag->ltidxs[get_mon_curtag(dst_mon)];
+
+	if (layout->id == DWINDLE) {
+		dwindle_move_next_to(c, target, config.dwindle_split_ratio, dir);
+		return;
+	}
+
+	bool insert_before = (dir == RIGHT || dir == UP);
+
+	client_reassign_monitor(c, dst_mon);
+
+	if (layout->id == SCROLLER || layout->id == VERTICAL_SCROLLER) {
+		bool along_axis = (layout->id == VERTICAL_SCROLLER)
+							  ? (dir == UP || dir == DOWN)
+							  : (dir == LEFT || dir == RIGHT);
+		if (!along_axis) {
+			scroller_insert_stack(c, target, insert_before);
+		} else if (insert_before) {
+			Client *head = scroll_get_stack_head_client(target);
+			wl_list_safe_reinsert_prev(&head->link, &c->link);
+		} else {
+			Client *tail = scroll_get_stack_tail_client(target);
+			wl_list_safe_reinsert_next(&tail->link, &c->link);
+		}
+	} else if (insert_before) {
+		wl_list_safe_reinsert_prev(&target->link, &c->link);
+	} else {
+		wl_list_safe_reinsert_next(&target->link, &c->link);
+	}
+
+	arrange(src_mon, false, false);
+	arrange(dst_mon, false, false);
 }
 
 void client_update_oldmonname_record(Client *c, Monitor *m) {
@@ -4448,6 +4504,8 @@ void handle_xwayland_ready(struct wl_listener *listener, void *data) {
 
 	/* assign the one and only seat */
 	wlr_xwayland_set_seat(server.xwayland, server.seat);
+
+	xwayland_primary_init();
 
 	/* The default cursor is loaded at the monitor scale to avoid upscaling
 	 * under HiDPI. */

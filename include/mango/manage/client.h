@@ -211,7 +211,6 @@ struct Client {
 	float unfocused_opacity;
 	char oldmonname[128];
 	int32_t noblur;
-	int32_t confine_pointer;
 	float blur_opacity;
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
 	double master_mfact_per, master_inner_per, stack_inner_per;
@@ -422,6 +421,7 @@ void client_exchange(Client *c1, Client *c2);
 void client_replace(Client *c, Client *w, bool is_group_change_member,
 					bool is_swallow);
 bool client_jump_to_monitor(Client *c, Monitor *m, int32_t dir);
+void client_move_to_monitor(Client *c, Client *target, int32_t dir);
 void client_update_oldmonname_record(Client *c, Monitor *m);
 void client_apply_bounds(Client *c, struct wlr_box *bbox);
 void client_swap_layout_properties(Client *c1, Client *c2);
