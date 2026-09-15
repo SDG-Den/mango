@@ -4631,7 +4631,7 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	} else if (strcmp(func_name, "grouptitle") == 0) {
 		func = set_grouptitle;
 		(*arg).v = strdup(arg_value);
-	} else if (strcmp( func_name, "groupsmart") == 0) {
+	} else if (strcmp(func_name, "groupsmart") == 0) {
 		func = group_smart;
 		(*arg).i = parse_direction(arg_value);
 	} else if (strcmp(func_name, "focusid") == 0) {

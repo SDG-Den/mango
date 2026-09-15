@@ -133,7 +133,7 @@ bindr=Super,Super_L,spawn,rofi -show run
 | :--- | :--- | :--- |
 | `groupjoin` | `left/right/up/down`  | Join group by direction. |
 | `groupmerge` | `left/right/up/down`  | merge window in direction into focused group. |
-| `smartgroup` | `left/right/up/down` | groupmerge if a group is focused, groupjoin if not |
+| `groupsmart` | `left/right/up/down` | groupmerge if a group is focused, groupjoin if not |
 | `groupfocus` | `prev/next`  | Focus group member by direction. |
 | `groupleave` | - | eject current focused window from group. |
 | `grouptitle` | `string` | set the group bar title for the focused window

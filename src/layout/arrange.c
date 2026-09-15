@@ -5,6 +5,7 @@
 #include "mango/input/pointer.h"
 #include "mango/ipc/ipc.h"
 #include "mango/layout/dwindle.h"
+#include "mango/layout/group.h"
 #include "mango/layout/layout.h"
 #include "mango/layout/scroll.h"
 #include "mango/layout/vertical.h"

@@ -254,19 +254,6 @@ void client_set_grouptitle(Client *c, const char *name) {
 		c->grouptitle = NULL;
 }
 
-void set_grouptitle(const Arg *arg) {
-	Client *c = arg->tc ? arg->tc : server.selected_monitor->sel;
-	if (!c)
-		return;
-	client_set_grouptitle(c, arg->v);
-	if (c->group_bar) {
-		mango_group_bar_update(c->group_bar, client_get_display_title(c),
-							   c->mon ? c->mon->wlr_output->scale : 1.0f);
-	}
-	if (c == client_focus_top(c->mon))
-		printstatus(IPC_WATCH_ARRANGGE);
-}
-
 int32_t client_is_float_type(Client *c) {
 	struct wlr_xdg_toplevel *toplevel;
 	struct wlr_xdg_toplevel_state state;
@@ -3607,9 +3594,8 @@ void client_replace(Client *c, Client *w, bool is_group_change_member,
 		overview_backup_surface(c);
 	}
 
-	if (w->group_bar && !is_group_change_member) {
+	if (w->group_bar)
 		wlr_scene_node_set_enabled(&w->group_bar->scene_buffer->node, false);
-	}
 
 	if (w->jump_label_node) {
 		wlr_scene_node_set_enabled(&w->jump_label_node->scene_buffer->node,
