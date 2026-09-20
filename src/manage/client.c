@@ -318,6 +318,15 @@ void client_set_border_color(Client *c, const float color[4]) {
 	wlr_scene_rect_set_color(c->border, color);
 }
 
+void client_set_state_colors(Client *c, const float border_color[4],
+							 const float dim_color[4]) {
+	client_set_border_color(c, border_color);
+
+	if (c->dim_node) {
+		mango_dim_node_set_color(c->dim_node, dim_color);
+	}
+}
+
 void client_set_fullscreen(Client *c, int32_t fullscreen) {
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
@@ -1126,6 +1135,15 @@ float *get_border_color(Client *c) {
 	}
 }
 
+float *get_dim_color(Client *c) {
+
+	if (server.selected_monitor && server.selected_monitor->sel == c) {
+		return config.dim_focused_color;
+	} else {
+		return config.dim_unfocused_color;
+	}
+}
+
 int32_t is_single_bit_set(uint32_t x) { return x && !(x & (x - 1)); }
 
 bool client_only_in_one_tag(Client *c) {
@@ -1340,8 +1358,8 @@ void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_FLOAT_PROP(c, r, focused_opacity);
 	APPLY_FLOAT_PROP(c, r, unfocused_opacity);
 
-	APPLY_STRING_PROP(c, r, animation_type_open);
-	APPLY_STRING_PROP(c, r, animation_type_close);
+	APPLY_INT_PROP(c, r, animation_type_open);
+	APPLY_INT_PROP(c, r, animation_type_close);
 }
 void set_float_malposition(Client *tc) {
 	Client *c = NULL;
@@ -1842,6 +1860,8 @@ void handle_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 
 	/* Allocate a Client for this surface */
 	c = toplevel->base->data = ecalloc(1, sizeof(*c));
+	c->animation_type_open = ANIM_TYPE_UNSET;
+	c->animation_type_close = ANIM_TYPE_UNSET;
 	c->surface.xdg = toplevel->base;
 	c->bw = config.borderpx;
 
@@ -1876,6 +1896,7 @@ void init_client_properties(Client *c) {
 	c->grid_row_per = 1.0f;
 	c->jump_label_node = NULL;
 	c->group_bar = NULL;
+	c->dim_node = NULL;
 	c->overview_scene_surface = NULL;
 	c->drop_direction = UNDIR;
 	c->enable_drop_area_draw = false;
@@ -1917,7 +1938,7 @@ void init_client_properties(Client *c) {
 	c->is_pending_open_animation = true;
 	c->drag_to_tile = false;
 	c->scratchpad_switching_mon = false;
-	c->scratchpad_tag_hidden = false;
+	c->scratchpad_tagin = false;
 	c->fake_no_border = false;
 	c->focused_opacity = config.focused_opacity;
 	c->unfocused_opacity = config.unfocused_opacity;
@@ -1967,6 +1988,10 @@ void init_client_properties(Client *c) {
 		   sizeof(c->opacity_animation.initial_border_color));
 	memcpy(c->opacity_animation.current_border_color, config.bordercolor,
 		   sizeof(c->opacity_animation.current_border_color));
+	memcpy(c->opacity_animation.initial_dim_color, config.dim_unfocused_color,
+		   sizeof(c->opacity_animation.initial_dim_color));
+	memcpy(c->opacity_animation.current_dim_color, config.dim_unfocused_color,
+		   sizeof(c->opacity_animation.current_dim_color));
 	c->opacity_animation.initial_opacity = c->unfocused_opacity;
 	c->opacity_animation.current_opacity = c->unfocused_opacity;
 	c->animation.tagining = false;
@@ -2032,9 +2057,10 @@ void handle_client_map(struct wl_listener *listener, void *data) {
 	c->geom.height += 2 * c->bw;
 	c->overview_backup_geom = c->geom;
 
+	struct wayland_string appid, title;
 	struct wlr_ext_foreign_toplevel_handle_v1_state foreign_toplevel_state = {
-		.app_id = client_get_appid(c),
-		.title = client_get_title(c),
+		.app_id = wayland_string_set(&appid, client_get_appid(c)),
+		.title = wayland_string_set(&title, client_get_title(c)),
 	};
 
 	c->image_capture_scene = wlr_scene_create();
@@ -2066,6 +2092,7 @@ void handle_client_map(struct wl_listener *listener, void *data) {
 	}
 
 	client_add_group_bar(c);
+	client_add_dim_node(c);
 
 	c->droparea = wlr_scene_rect_create(c->scene, 0, 0, config.dropcolor);
 	wlr_scene_node_lower_to_bottom(&c->droparea->node);
@@ -2388,6 +2415,11 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 		c->group_bar = NULL;
 	}
 
+	if (c->dim_node) {
+		mango_dim_node_destroy(c->dim_node);
+		c->dim_node = NULL;
+	}
+
 	if (c->image_capture_scene) {
 		wlr_scene_node_destroy(&c->image_capture_scene->tree.node);
 		c->image_capture_scene = NULL;
@@ -2488,17 +2520,20 @@ void handle_client_set_title(struct wl_listener *listener, void *data) {
 	if (!c || c->iskilling)
 		return;
 
-	const char *title;
-	title = client_get_title(c);
+	const char *title = client_get_title(c);
 	mango_group_bar_update(c->group_bar, title,
 						   c->mon ? c->mon->wlr_output->scale : 1.0f);
-	if (title && c->foreign_toplevel)
-		wlr_foreign_toplevel_handle_v1_set_title(c->foreign_toplevel, title);
-	if (title && c->ext_foreign_toplevel) {
+
+	struct wayland_string wayland_title;
+	const char *clamped_title = wayland_string_set(&wayland_title, title);
+	if (c->foreign_toplevel)
+		wlr_foreign_toplevel_handle_v1_set_title(c->foreign_toplevel,
+												 clamped_title);
+	if (c->ext_foreign_toplevel) {
 		wlr_ext_foreign_toplevel_handle_v1_update_state(
 			c->ext_foreign_toplevel,
 			&(struct wlr_ext_foreign_toplevel_handle_v1_state){
-				.title = title,
+				.title = clamped_title,
 				.app_id = c->ext_foreign_toplevel->app_id,
 			});
 	}
@@ -3406,6 +3441,7 @@ bool switch_scratchpad_client_state(Client *c) {
 		// not visible on this tag: move the scratchpad here and show it
 		c->tags = c->mon->tagset[c->mon->seltags];
 		c->oldtags = c->tags;
+		c->scratchpad_tagin = true; // apply the scratchpad tagin animation
 		if (SCRATCHPAD_SHOWN(c)) {
 			arrange(c->mon, false, false);
 			client_focus(c, 1);
@@ -3445,9 +3481,22 @@ void client_update_border_color(Client *c) {
 		return;
 
 	float *border_color = get_border_color(c);
+	float *dim_color = get_dim_color(c);
 	memcpy(c->opacity_animation.target_border_color, border_color,
 		   sizeof(c->opacity_animation.target_border_color));
-	client_set_border_color(c, border_color);
+	memcpy(c->opacity_animation.target_dim_color, dim_color,
+		   sizeof(c->opacity_animation.target_dim_color));
+	client_set_state_colors(c, border_color, dim_color);
+}
+
+void client_add_dim_node(Client *c) {
+	c->dim_node =
+		mango_dim_node_create(c->scene_surface, config.dim_unfocused_color);
+	if (!c->dim_node) {
+		return;
+	}
+
+	mango_dim_node_set_enabled(c->dim_node, false);
 }
 
 void client_exchange(Client *c1, Client *c2) {
@@ -3850,6 +3899,17 @@ uint32_t client_target_layer(Client *c) {
 
 	bool special_overlay = (c->tags & TAG0_MASK) ||
 						   (is_special_active(c->mon) && SCRATCHPAD_SHOWN(c));
+
+	if (config.float_full_to_top) {
+		if (special_overlay)
+			return c->isfloating || c->isfullscreen ? LyrSpecialTop
+				   : c->ismaximizescreen			? LyrSpecialMaximize
+													: LyrSpecialTile;
+
+		return c->isfloating || c->isfullscreen ? LyrTop
+			   : c->ismaximizescreen			? LyrMaximize
+												: LyrTile;
+	}
 
 	if (special_overlay)
 		return c->isfullscreen		 ? LyrSpecialFullscreen
@@ -4288,6 +4348,8 @@ void handle_new_xwayland_surface(struct wl_listener *listener, void *data) {
 
 	/* Allocate a Client for this surface */
 	c = xsurface->data = ecalloc(1, sizeof(*c));
+	c->animation_type_open = ANIM_TYPE_UNSET;
+	c->animation_type_close = ANIM_TYPE_UNSET;
 	c->surface.xwayland = xsurface;
 	c->type = X11;
 	/* Listen to the various events it can emit */

@@ -30,14 +30,21 @@
 	if (rule->prop > 0.0f)                                                     \
 	obj->prop = rule->prop
 
-#define APPLY_STRING_PROP(obj, rule, prop)                                     \
-	if (rule->prop != NULL)                                                    \
-	obj->prop = rule->prop
-
 /* Tag animation / folding / global switch state. */
 enum { VERTICAL, HORIZONTAL };
 enum { UNFOLD, FOLD, INVALIDFOLD };
 enum { STATE_UNSPECIFIED = 0, STATE_ENABLED, STATE_DISABLED };
+
+enum animation_type {
+	ANIM_TYPE_UNSET = -1,
+	ANIM_TYPE_NONE = 0,
+	ANIM_TYPE_FADE,
+	ANIM_TYPE_SLIDE,
+	ANIM_TYPE_ZOOM,
+	ANIM_TYPE_UNKNOWN,
+};
+
+int32_t animation_type_from_string(const char *value);
 
 enum tearing_mode {
 	TEARING_DISABLED = 0,
@@ -108,10 +115,8 @@ typedef struct {
 	int32_t isfullscreen;
 	int32_t isfakefullscreen;
 	float scroller_proportion;
-	const char *animation_type_open;
-	const char *animation_type_close;
-	const char *layer_animation_type_open;
-	const char *layer_animation_type_close;
+	int32_t animation_type_open;
+	int32_t animation_type_close;
 	int32_t isnoborder;
 	int32_t isnoshadow;
 	int32_t isnoradius;
@@ -202,8 +207,8 @@ typedef struct {
 
 typedef struct {
 	char *layer_name; // Layout name
-	char *animation_type_open;
-	char *animation_type_close;
+	int32_t animation_type_open;
+	int32_t animation_type_close;
 	int32_t shield_when_capture;
 	int32_t noblur;
 	int32_t noanim;
@@ -304,10 +309,10 @@ typedef struct {
 typedef struct {
 	int32_t animations;
 	int32_t layer_animations;
-	char animation_type_open[10];
-	char animation_type_close[10];
-	char layer_animation_type_open[10];
-	char layer_animation_type_close[10];
+	int32_t animation_type_open;
+	int32_t animation_type_close;
+	int32_t layer_animation_type_open;
+	int32_t layer_animation_type_close;
 	int32_t animation_fade_in;
 	int32_t animation_fade_out;
 	int32_t tag_animation_direction;
@@ -347,6 +352,7 @@ typedef struct {
 	int32_t no_radius_when_single;
 	int32_t snap_distance;
 	int32_t enable_floating_snap;
+	int32_t float_full_to_top;
 	int32_t drag_tile_to_tile;
 	int32_t drag_tile_small;
 	uint32_t swipe_min_threshold;
@@ -460,6 +466,9 @@ typedef struct {
 	int32_t shadows_position_x;
 	int32_t shadows_position_y;
 	float shadowscolor[4];
+	int32_t dim_enable;
+	float dim_focused_color[4];
+	float dim_unfocused_color[4];
 
 	/* appearance */
 	int32_t smartgaps;
