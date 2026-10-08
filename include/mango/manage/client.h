@@ -229,6 +229,7 @@ struct Client {
 	Client *group_prev;
 	Client *group_next;
 	bool is_group_focus;
+	char *grouptitle;
 
 	/* auto tab chain; state kept fully separate from group */
 	MangoBarDecoration *tab_bar;
@@ -290,6 +291,8 @@ void client_get_geometry(Client *c, struct wlr_box *geom);
 Client *client_get_parent(Client *c);
 int32_t client_has_children(Client *c);
 const char *client_get_title(Client *c);
+const char *client_get_display_title(Client *c);
+void client_set_grouptitle(Client *c, const char *name);
 int32_t client_is_float_type(Client *c);
 int32_t client_is_rendered_on_mon(Client *c, Monitor *m);
 int32_t client_is_unmanaged(Client *c);
@@ -458,6 +461,9 @@ Client *client_group_active(Client *c);
 Client *client_group_head(Client *c);
 Client *client_group_focused(Client *c);
 bool client_is_group_member(const Client *c);
+
+Client *group_capture_get_parent(void);
+bool group_capture_spawn(Client *c, Client *group_parent);
 
 Client *client_chain_head(Client *c, size_t prev_off);
 void client_chain_unlink(Client *c, size_t prev_off, size_t next_off);

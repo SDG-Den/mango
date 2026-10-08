@@ -69,11 +69,29 @@ Monitor *monitor_by_name(const char *name) {
 	return NULL;
 }
 
+static Client *client_ipc_chain_head(Client *c) {
+	Client *head = client_group_head(c);
+	return head ? head : c;
+}
+
+static bool client_list_has_id(const cJSON *arr, uint32_t id) {
+	for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+		if ((uint32_t)cJSON_GetArrayItem(arr, i)->valuedouble == id)
+			return true;
+	return false;
+}
+
 Client *client_by_id(uint32_t id) {
 	Client *c;
 	wl_list_for_each(c, &server.clients, link) {
 		if (c->id == id)
 			return c;
+		/* Parked group members are unlinked from server.clients; walk the
+		 * whole chain reachable from this visible member so hidden members
+		 * stay addressable over IPC. */
+		for (Client *cur = client_ipc_chain_head(c); cur; cur = cur->group_next)
+			if (cur->id == id)
+				return cur;
 	}
 	return NULL;
 }
@@ -553,7 +571,28 @@ cJSON *monitor_active_tags(Monitor *m) {
 			cJSON_AddItemToArray(arr, cJSON_CreateNumber(i + 1));
 	return arr;
 }
+static int collect_group_info(Client *c, uint32_t *ids, int max,
+							  uint32_t *active) {
+	*active = 0;
+	if (!c || (!client_is_group_member(c) && !c->is_group_focus))
+		return 0;
+
+	int n = 0;
+	for (Client *cur = client_group_head(c); cur && n < max;
+		 cur = cur->group_next) {
+		ids[n] = cur->id;
+		if (cur->is_group_focus)
+			*active = cur->id;
+		n++;
+	}
+	return n;
+}
+
 cJSON *build_client_json(Client *c) {
+	uint32_t group_ids[256];
+	uint32_t group_active = 0;
+	int group_size = collect_group_info(c, group_ids, 256, &group_active);
+
 	cJSON *obj = cJSON_CreateObject();
 
 	cJSON_AddNumberToObject(obj, "id", c->id);
@@ -561,6 +600,8 @@ cJSON *build_client_json(Client *c) {
 	cJSON_AddStringToObject(obj, "foreign_toplevel_id",
 							c->ext_foreign_toplevel->identifier);
 	cJSON_AddStringToObject(obj, "title", client_get_title(c));
+	cJSON_AddStringToObject(obj, "grouptitle",
+							c->grouptitle ? c->grouptitle : "");
 	cJSON_AddStringToObject(obj, "appid", client_get_appid(c));
 	cJSON_AddStringToObject(obj, "monitor",
 							c->mon ? c->mon->wlr_output->name : "");
@@ -568,7 +609,14 @@ cJSON *build_client_json(Client *c) {
 	cJSON_AddBoolToObject(obj, "is_xwayland", c->type == X11 ? true : false);
 	cJSON_AddBoolToObject(obj, "is_swallowing", c->swallowing ? true : false);
 	cJSON_AddBoolToObject(obj, "is_swallowedby", c->swallowdby ? true : false);
-	cJSON_AddBoolToObject(obj, "is_group", client_is_group_member(c));
+	cJSON_AddBoolToObject(obj, "is_group", group_size > 0);
+	cJSON_AddBoolToObject(obj, "is_group_active", c->is_group_focus);
+	cJSON_AddNumberToObject(obj, "group_size", group_size);
+	cJSON_AddNumberToObject(obj, "group_active", group_active);
+	cJSON *group_members = cJSON_CreateArray();
+	for (int i = 0; i < group_size; i++)
+		cJSON_AddItemToArray(group_members, cJSON_CreateNumber(group_ids[i]));
+	cJSON_AddItemToObject(obj, "group_members", group_members);
 	cJSON_AddBoolToObject(obj, "is_visible", c->mon && VISIBLEON(c, c->mon));
 	cJSON_AddBoolToObject(obj, "is_focused", c->isfocusing);
 	cJSON_AddBoolToObject(obj, "is_fullscreen", c->isfullscreen);
@@ -726,8 +774,17 @@ void handle_command(int client_fd, const char *cmd_raw) {
 	} else if (strcmp(cmd, "get all-clients") == 0) {
 		cJSON *arr = cJSON_CreateArray();
 		Client *c;
-		wl_list_for_each(c, &server.clients, link)
+		wl_list_for_each(c, &server.clients, link) {
 			cJSON_AddItemToArray(arr, build_client_json(c));
+			if (client_is_group_member(c) || c->is_group_focus) {
+				/* Parked members are net from server.clients; pull them in
+				 * from the chain so IPC sees every group member. */
+				for (Client *cur = client_ipc_chain_head(c); cur;
+					 cur = cur->group_next)
+					if (cur != c && !client_list_has_id(arr, cur->id))
+						cJSON_AddItemToArray(arr, build_client_json(cur));
+			}
+		}
 		resp = cJSON_CreateObject();
 		cJSON_AddItemToObject(resp, "clients", arr);
 	} else if (strcmp(cmd, "get all-monitors") == 0) {

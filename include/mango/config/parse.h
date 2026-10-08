@@ -108,6 +108,7 @@ typedef struct {
 typedef struct {
 	const char *id;
 	const char *title;
+	const char *grouptitle;
 	int32_t is_once;
 	int32_t is_once_applied;
 	uint32_t tags;
@@ -487,6 +488,7 @@ typedef struct {
 	uint32_t group_bar_height;
 	uint32_t tab_bar_height;
 	int32_t always_show_group_bar;
+	int32_t group_capture_spawn;
 	int32_t group_bar_close_button_enable;
 	uint32_t group_bar_button_size;
 	uint32_t group_bar_button_margin;

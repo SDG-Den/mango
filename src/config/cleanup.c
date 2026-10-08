@@ -65,10 +65,13 @@ void free_config(void) {
 				free((void *)rule->id);
 			if (rule->title)
 				free((void *)rule->title);
+			if (rule->grouptitle)
+				free((void *)rule->grouptitle);
 			if (rule->monitor)
 				free((void *)rule->monitor);
 			rule->id = NULL;
 			rule->title = NULL;
+			rule->grouptitle = NULL;
 			rule->animation_type_open = ANIM_TYPE_UNSET;
 			rule->animation_type_close = ANIM_TYPE_UNSET;
 			rule->monitor = NULL;

@@ -528,6 +528,21 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).i = parse_direction(arg_value);
 	} else if (strcmp(func_name, "groupleave") == 0) {
 		func = group_leave;
+	} else if (strcmp(func_name, "groupinit") == 0) {
+		func = group_init;
+	} else if (strcmp(func_name, "groupall") == 0) {
+		func = group_all;
+	} else if (strcmp(func_name, "groupmerge") == 0) {
+		func = group_merge;
+		(*arg).i = parse_direction(arg_value);
+	} else if (strcmp(func_name, "groupsmart") == 0) {
+		func = group_smart;
+		(*arg).i = parse_direction(arg_value);
+	} else if (strcmp(func_name, "groupdisband") == 0) {
+		func = group_disband;
+	} else if (strcmp(func_name, "grouptitle") == 0) {
+		func = set_grouptitle;
+		(*arg).v = strdup(arg_value);
 	} else if (strcmp(func_name, "focusid") == 0) {
 		func = focus_by_id;
 	} else if (strcmp(func_name, "incnmaster") == 0) {

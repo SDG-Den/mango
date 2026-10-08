@@ -395,10 +395,8 @@ bool client_group_leave(Client *tc) {
 	tc->tag_visible = was_visible;
 	client_update_visibility(tc);
 
-	if (!client_is_group_member(rc)) {
-		rc->is_group_focus = false;
-	}
-
+	/* rc keeps is_group_focus (set by client_focus_group_member above), so a
+	 * 2-member group leaves a single-member group behind, matching groupinit. */
 	return true;
 }
 
@@ -410,6 +408,162 @@ int32_t group_leave(const Arg *arg) {
 	if (client_group_leave(tc))
 		arrange(tc->mon, false, false);
 
+	return 0;
+}
+
+int32_t group_init(const Arg *arg) {
+	if (!server.selected_monitor || server.selected_monitor->isoverview)
+		return 0;
+
+	Client *target = arg->tc ? arg->tc : server.selected_monitor->sel;
+	if (!target || !target->mon)
+		return 0;
+	if (client_is_group_member(target) || target->is_group_focus)
+		return 0;
+
+	target->is_group_focus = true;
+	client_focus(target, 1);
+	arrange(target->mon, false, false);
+	return 0;
+}
+
+int32_t group_merge(const Arg *arg) {
+	if (!server.selected_monitor || server.selected_monitor->isoverview)
+		return 0;
+
+	Client *group = arg->tc ? arg->tc : server.selected_monitor->sel;
+	if (!group || !group->mon)
+		return 0;
+
+	Client *target = direction_select(arg);
+	if (!target || target == group)
+		return 0;
+
+	client_group_join(target, group);
+	return 0;
+}
+
+int32_t group_smart(const Arg *arg) {
+	if (!server.selected_monitor || server.selected_monitor->isoverview)
+		return 0;
+
+	Client *target = server.selected_monitor->sel;
+	if (!target || !target->mon)
+		return 0;
+
+	if (client_is_group_member(target))
+		return group_merge(arg);
+	return group_join(arg);
+}
+
+int32_t group_disband(const Arg *arg) {
+	if (!server.selected_monitor || server.selected_monitor->isoverview)
+		return 0;
+
+	Client *target = arg->tc ? arg->tc : server.selected_monitor->sel;
+	if (!target)
+		return 0;
+
+	/* A parked member has mon == NULL; resolve the chain's active member so
+	 * disband works from any member id, visible or parked. */
+	Client *anchor = client_group_active(target);
+	if (anchor && anchor->mon)
+		target = anchor;
+	if (!target->mon)
+		return 0;
+
+	Client *members[256];
+	int count = 0;
+	for (Client *cur = client_group_head(target); cur && count < 256;
+		 cur = cur->group_next)
+		members[count++] = cur;
+
+	for (int i = 0; i < count; i++) {
+		members[i]->mon = target->mon;
+		if (client_is_parked(members[i]))
+			client_unpark(members[i], target);
+		client_group_detach(members[i]);
+		wlr_scene_node_set_enabled(&members[i]->scene->node, true);
+	}
+
+	client_focus(target, 1);
+	arrange(target->mon, false, false);
+	return 0;
+}
+
+int32_t group_all(const Arg *arg) {
+	(void)arg;
+	if (!server.selected_monitor || server.selected_monitor->isoverview)
+		return 0;
+
+	Client *visible[256];
+	int count = 0;
+	Client *client;
+	wl_list_for_each(client, &server.clients, link) {
+		if (!VISIBLEON(client, server.selected_monitor))
+			continue;
+		Client *head = client_group_head(client);
+		for (Client *cur = head; cur && count < 256; cur = cur->group_next) {
+			int j = 0;
+			while (j < count && visible[j] != cur)
+				j++;
+			if (j == count)
+				visible[count++] = cur;
+		}
+	}
+	if (count < 2)
+		return 0;
+
+	for (int index = 1; index < count; index++) {
+		if (visible[index]->is_group_focus &&
+			!client_is_parked(visible[index])) {
+			Client *swap = visible[0];
+			visible[0] = visible[index];
+			visible[index] = swap;
+			break;
+		}
+	}
+
+	for (int index = 0; index < count; index++)
+		if (client_is_group_member(visible[index]))
+			client_group_detach(visible[index]);
+
+	Client *target = visible[0];
+	target->is_group_focus = true;
+
+	for (int index = 1; index < count; index++) {
+		visible[index]->group_next = target;
+		if (target->group_prev)
+			target->group_prev->group_next = visible[index];
+		visible[index]->group_prev = target->group_prev;
+		target->group_prev = visible[index];
+
+		dwindle_remove_client(visible[index]);
+		scroller_remove_client(visible[index]);
+		client_park(visible[index]);
+		wlr_scene_node_set_enabled(&visible[index]->scene->node, false);
+		if (visible[index]->group_bar)
+			wlr_scene_node_set_enabled(&visible[index]->group_bar->scene->node,
+									   false);
+	}
+
+	client_focus(target, 1);
+	arrange(target->mon, false, false);
+	return 0;
+}
+
+int32_t set_grouptitle(const Arg *arg) {
+	if (!server.selected_monitor)
+		return 0;
+
+	Client *c = arg->tc ? arg->tc : server.selected_monitor->sel;
+	if (!c)
+		return 0;
+
+	client_set_grouptitle(c, arg->v);
+	client_update_group_bar_title(c);
+	if (c->mon && c == client_focus_top(c->mon))
+		printstatus(IPC_WATCH_ARRANGGE);
 	return 0;
 }
 

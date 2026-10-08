@@ -839,6 +839,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->tab_bar_height = atoi(value);
 	} else if (strcmp(key, "always_show_group_bar") == 0) {
 		config->always_show_group_bar = atoi(value);
+	} else if (strcmp(key, "group_capture_spawn") == 0) {
+		config->group_capture_spawn = atoi(value);
 	} else if (strcmp(key, "group_bar_close_button_enable") == 0) {
 		config->group_bar_close_button_enable = atoi(value);
 	} else if (strcmp(key, "group_bar_button_size") == 0) {
@@ -1367,6 +1369,7 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		rule->monitor = NULL;
 		rule->id = NULL;
 		rule->title = NULL;
+		rule->grouptitle = NULL;
 
 		rule->globalkeybinding = (KeyBinding){0};
 
@@ -1386,6 +1389,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->isfloating = atoi(val);
 				} else if (strcmp(key, "title") == 0) {
 					rule->title = strdup(val);
+				} else if (strcmp(key, "grouptitle") == 0) {
+					rule->grouptitle = strdup(val);
 				} else if (strcmp(key, "app_id") == 0) {
 					rule->id = strdup(val);
 				} else if (strcmp(key, "animation_type_open") == 0) {
@@ -2359,6 +2364,7 @@ void set_value_default() {
 	config.group_bar_height = 33;
 	config.tab_bar_height = 33;
 	config.always_show_group_bar = 0;
+	config.group_capture_spawn = 0;
 	config.group_bar_close_button_enable = 1;
 	config.group_bar_button_size = 16;
 	config.group_bar_button_margin = 4;
@@ -2791,6 +2797,7 @@ void override_config(void) {
 	config.tab_bar_height = CLAMP_INT(config.tab_bar_height, 0, 500);
 	config.always_show_group_bar =
 		CLAMP_INT(config.always_show_group_bar, 0, 1);
+	config.group_capture_spawn = CLAMP_INT(config.group_capture_spawn, 0, 1);
 	config.group_bar_close_button_enable =
 		CLAMP_INT(config.group_bar_close_button_enable, 0, 1);
 	config.group_bar_button_size =

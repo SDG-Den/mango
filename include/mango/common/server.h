@@ -168,6 +168,7 @@ struct MangoServer {
 	double swipe_dy;
 
 	bool render_border;
+	bool group_capture_inhibit_arrange;
 
 	/* Other runtime state */
 	uint32_t chvt_backup_tag;

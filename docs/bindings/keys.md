@@ -134,8 +134,14 @@ bindr=Super,Super_L,spawn,rofi -show run
 | Command | Param | Description |
 | :--- | :--- | :--- |
 | `groupjoin` | `left/right/up/down`  | Join group by direction. |
+| `groupmerge` | `left/right/up/down`  | Pull the window in a direction into the focused group. |
+| `groupsmart` | `left/right/up/down`  | groupmerge when a group is focused, groupjoin otherwise. |
 | `groupfocus` | `prev/next`  | Focus group member by direction. |
-| `groupleave` | -  | Leave group. |
+| `groupleave` | -  | Eject the focused window from its group. |
+| `grouptitle` | `string` | Set the group bar title of the focused window. |
+| `groupinit` | -  | Start a group containing only the focused window. |
+| `groupall` | -  | Group every visible window on the current output. |
+| `groupdisband` | -  | Ungroup every member of the group. |
 
 ### Tags & Monitors
 

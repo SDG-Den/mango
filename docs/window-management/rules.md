@@ -25,6 +25,7 @@ window_rule_once=Parameter:Values,Parameter:Values,app_id:Values,title:Values
 | :--- | :--- | :--- | :--- |
 | `app_id` | string | Any | Match by application ID, supports regex |
 | `title` | string | Any | Match by window title, supports regex |
+| `grouptitle` | string | Any | Override the title shown in this window's group bar |
 | `is_floating` | integer | `0` / `1` | Force floating state |
 | `is_fullscreen` | integer | `0` / `1` | Force fullscreen state |
 | `is_fake_fullscreen` | integer | `0` / `1` | Force fake-fullscreen state (window stays constrained) |

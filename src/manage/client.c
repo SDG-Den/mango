@@ -240,6 +240,18 @@ const char *client_get_title(Client *c) {
 	return c->surface.xdg->toplevel->title ? c->surface.xdg->toplevel->title
 										   : "broken";
 }
+const char *client_get_display_title(Client *c) {
+	if (c->grouptitle && c->grouptitle[0])
+		return c->grouptitle;
+	return client_get_title(c);
+}
+
+void client_set_grouptitle(Client *c, const char *name) {
+	if (!c)
+		return;
+	free(c->grouptitle);
+	c->grouptitle = name && name[0] ? strdup(name) : NULL;
+}
 int32_t client_is_float_type(Client *c) {
 	struct wlr_xdg_toplevel *toplevel;
 	struct wlr_xdg_toplevel_state state;
@@ -1466,6 +1478,11 @@ void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 
 	APPLY_INT_PROP(c, r, animation_type_open);
 	APPLY_INT_PROP(c, r, animation_type_close);
+
+	if (r->grouptitle) {
+		client_set_grouptitle(c, r->grouptitle);
+		client_update_group_bar_title(c);
+	}
 }
 void set_float_malposition(Client *tc) {
 	Client *c = NULL;
@@ -2338,6 +2355,12 @@ void handle_client_map(struct wl_listener *listener, void *data) {
 
 	wl_list_insert(&server.focus_stack, &c->flink);
 
+	Client *group_parent = group_capture_get_parent();
+	bool group_capture_active =
+		config.group_capture_spawn && group_parent != NULL;
+	if (group_capture_active)
+		server.group_capture_inhibit_arrange = true;
+
 	client_apply_rules(c, NULL, NULL);
 
 	client_apply_xwayland(c);
@@ -2346,6 +2369,13 @@ void handle_client_map(struct wl_listener *listener, void *data) {
 		client_set_tiled(c, WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT |
 								WLR_EDGE_RIGHT);
 	}
+
+	server.group_capture_inhibit_arrange = false;
+
+	bool captured = group_capture_spawn(c, group_parent);
+
+	if (group_capture_active && !captured)
+		arrange(c->mon, false, false);
 
 	// apply buffer effects of client
 	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
@@ -2359,8 +2389,7 @@ void handle_client_map(struct wl_listener *listener, void *data) {
 		overview_backup_surface(c);
 	}
 
-	// make sure the animation is open type
-	c->is_pending_open_animation = true;
+	c->is_pending_open_animation = !captured;
 	resize(c, c->geom, 0);
 	printstatus(IPC_WATCH_ARRANGGE);
 }
@@ -2652,6 +2681,7 @@ void handle_client_destroy(struct wl_listener *listener, void *data) {
 	}
 	switcher_remove_client(c);
 	pointer_client_destroyed(c);
+	free(c->grouptitle);
 	free(c);
 }
 
@@ -4212,7 +4242,7 @@ void client_sync_layer(Client *c) {
 bool client_wants_group_bar(Client *c) {
 	if (!c)
 		return false;
-	if (client_is_group_member(c))
+	if (client_is_group_member(c) || c->is_group_focus)
 		return true;
 	return config.always_show_group_bar;
 }
@@ -4239,7 +4269,7 @@ void client_add_group_bar(Client *c) {
 void client_update_group_bar_title(Client *c) {
 	if (!c || !c->group_bar)
 		return;
-	mango_bar_decoration_update(c->group_bar, client_get_title(c),
+	mango_bar_decoration_update(c->group_bar, client_get_display_title(c),
 								c->mon ? c->mon->wlr_output->scale
 								: server.selected_monitor
 									? server.selected_monitor->wlr_output->scale
@@ -4312,8 +4342,7 @@ void client_check_tab_node_visible(Client *c) {
 			cur = cur->group_next;
 			continue;
 		}
-		bool grouped = client_is_group_member(cur);
-		bool group_active = grouped && cur->is_group_focus;
+		bool group_active = cur->is_group_focus;
 		bool show_close = show && config.always_show_group_bar &&
 						  config.group_bar_close_button_enable;
 		/* The strip is drawn from one bar node per member; keep the whole
@@ -4453,6 +4482,33 @@ void client_chain_unlink(Client *c, size_t prev_off, size_t next_off) {
 static void client_group_mark_dirty(Client *c) {
 	for (Client *it = client_group_head(c); it; it = it->group_next)
 		it->need_output_flush = true;
+}
+
+Client *group_capture_get_parent(void) {
+	if (!config.group_capture_spawn || !server.selected_monitor)
+		return NULL;
+
+	Client *sel = server.selected_monitor->sel;
+	if (sel && (client_is_group_member(sel) || sel->is_group_focus))
+		return sel;
+
+	return NULL;
+}
+
+bool group_capture_spawn(Client *c, Client *group_parent) {
+	if (!config.group_capture_spawn || !group_parent || !c->mon ||
+		c->mon != group_parent->mon || client_is_group_member(c) ||
+		!(client_is_group_member(group_parent) || group_parent->is_group_focus))
+		return false;
+
+	c->group_prev = group_parent->group_prev;
+	if (group_parent->group_prev)
+		group_parent->group_prev->group_next = c;
+	c->group_next = group_parent;
+	group_parent->group_prev = c;
+	c->is_pending_open_animation = false;
+	client_focus_group_member(c);
+	return true;
 }
 
 void client_group_detach(Client *c) {
